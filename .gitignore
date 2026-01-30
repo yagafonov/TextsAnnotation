@@ -4,5 +4,7 @@ __pycache__/
 *.sqlite
 *.sqlite3
 *.sql
+.venv
+data/raw_texts_with_preds
 .env
 .streamlit/
