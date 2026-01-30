@@ -141,6 +141,18 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS skipped_texts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text_id INTEGER NOT NULL,
+                annotator TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(text_id) REFERENCES texts(id),
+                UNIQUE(text_id, annotator)
+            )
+            """
+        )
         conn.commit()
         ensure_column(conn, "texts", "assigned_cluster", "TEXT")
 

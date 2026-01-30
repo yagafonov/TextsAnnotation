@@ -289,34 +289,74 @@ st.subheader("Список текстов")
 if annotators and not password_ok:
     st.stop()
 
-show_all = st.checkbox("Показать все тексты (без фильтра по кластеру)")
+col_filter1, col_filter2 = st.columns(2)
+with col_filter1:
+    show_all = st.checkbox("Показать все тексты (без фильтра по кластеру)")
+with col_filter2:
+    show_skipped = st.checkbox("Показать пропущенные тексты")
+
 with connect() as conn:
-    base_query = """
-        SELECT t.id, t.text, t.language, t.clusters, t.assigned_cluster, t.data_version, t.created_at,
-               COUNT(DISTINCT a.annotator) as annotators
-        FROM texts t
-        LEFT JOIN annotations a ON a.text_id = t.id
-    """
-    filters = []
-    params: List[str] = []
-    if annotator:
+    if show_skipped and annotator:
+        # Show only skipped texts for this annotator
+        base_query = """
+            SELECT t.id, t.text, t.language, t.clusters, t.assigned_cluster, t.data_version, t.created_at,
+                   COUNT(DISTINCT a.annotator) as annotators,
+                   1 as is_skipped
+            FROM texts t
+            LEFT JOIN annotations a ON a.text_id = t.id
+            INNER JOIN skipped_texts s ON s.text_id = t.id AND s.annotator = ?
+        """
+        filters = []
+        params: List[str] = [annotator]
+        # Exclude already annotated by this user
         filters.append("NOT EXISTS (SELECT 1 FROM annotations a2 WHERE a2.text_id = t.id AND a2.annotator = ?)")
         params.append(annotator)
-    if annotator_cluster and not show_all:
-        filters.append("t.assigned_cluster = ?")
-        params.append(annotator_cluster)
-    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    query = f"{base_query} {where_clause} GROUP BY t.id ORDER BY t.created_at DESC"
-    texts = conn.execute(query, params).fetchall()
+        if annotator_cluster and not show_all:
+            filters.append("t.assigned_cluster = ?")
+            params.append(annotator_cluster)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        query = f"{base_query} {where_clause} GROUP BY t.id ORDER BY t.created_at DESC"
+        texts = conn.execute(query, params).fetchall()
+    else:
+        # Normal mode - show unannotated and unskipped texts
+        base_query = """
+            SELECT t.id, t.text, t.language, t.clusters, t.assigned_cluster, t.data_version, t.created_at,
+                   COUNT(DISTINCT a.annotator) as annotators
+            FROM texts t
+            LEFT JOIN annotations a ON a.text_id = t.id
+        """
+        filters = []
+        params: List[str] = []
+        if annotator:
+            filters.append("NOT EXISTS (SELECT 1 FROM annotations a2 WHERE a2.text_id = t.id AND a2.annotator = ?)")
+            params.append(annotator)
+            filters.append("NOT EXISTS (SELECT 1 FROM skipped_texts s WHERE s.text_id = t.id AND s.annotator = ?)")
+            params.append(annotator)
+        if annotator_cluster and not show_all:
+            filters.append("t.assigned_cluster = ?")
+            params.append(annotator_cluster)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        query = f"{base_query} {where_clause} GROUP BY t.id ORDER BY t.created_at DESC"
+        texts = conn.execute(query, params).fetchall()
 
 if not texts:
-    st.info("Добавьте тексты для разметки.")
+    if show_skipped:
+        st.info("Нет пропущенных текстов.")
+    else:
+        st.info("Нет текстов для разметки.")
     st.stop()
 
-text_options = {
-    f"#{row['id']} [{row['assigned_cluster'] or 'unknown'}] ({row['annotators']} разметчика)": row["id"]
-    for row in texts
-}
+if show_skipped:
+    text_options = {
+        f"#{row['id']} [{row['assigned_cluster'] or 'unknown'}] ({row['annotators']} разметчика) [ПРОПУЩЕН]": row["id"]
+        for row in texts
+    }
+    st.caption(f"Пропущенных текстов: {len(texts)}")
+else:
+    text_options = {
+        f"#{row['id']} [{row['assigned_cluster'] or 'unknown'}] ({row['annotators']} разметчика)": row["id"]
+        for row in texts
+    }
 selected_label = st.selectbox("Выберите текст для разметки", list(text_options.keys()))
 selected_text_id = text_options[selected_label]
 
@@ -358,15 +398,20 @@ with col1:
         decision = st.radio(
             f"{label}",
             ["yes", "no", "unsure"],
+            index=1,
             horizontal=True,
             key=f"decision_{selected_text_id}_{label}",
         )
         decisions[label] = decision
         with st.expander("Описание интента"):
             st.write(label_info.get("description", "Нет описания."))
-            st.write("Примеры:")
-            st.write(", ".join(label_info.get("train", [])[:5]) or "Нет примеров"
-            )
+            examples = label_info.get("train", [])[:5]
+            if examples:
+                st.write("Примеры:")
+                for example in examples:
+                    st.write(f"- {example}")
+            else:
+                st.write("Нет примеров.")
 
 with col2:
     st.markdown("### Метаданные")
@@ -384,13 +429,36 @@ extra_labels = st.multiselect(
     [label for label in all_intents if label not in candidate_labels],
 )
 
-if st.button("Сохранить разметку"):
-    if not annotator:
-        st.error("Укажите имя разметчика в боковой панели.")
-    else:
-        save_annotations(selected_text_id, annotator, decisions, candidate_labels, extra_labels)
-        st.toast("Разметка сохранена. Загружается следующий текст...")
-        st.rerun()
+col_save, col_skip = st.columns([1, 1])
+with col_save:
+    if st.button("Сохранить разметку", type="primary"):
+        if not annotator:
+            st.error("Укажите имя разметчика в боковой панели.")
+        else:
+            save_annotations(selected_text_id, annotator, decisions, candidate_labels, extra_labels)
+            # Remove from skipped if it was there
+            with connect() as conn:
+                conn.execute(
+                    "DELETE FROM skipped_texts WHERE text_id = ? AND annotator = ?",
+                    (selected_text_id, annotator),
+                )
+                conn.commit()
+            st.toast("Разметка сохранена. Загружается следующий текст...")
+            st.rerun()
+
+with col_skip:
+    if st.button("Пропустить", disabled=show_skipped):
+        if not annotator:
+            st.error("Укажите имя разметчика в боковой панели.")
+        else:
+            with connect() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO skipped_texts (text_id, annotator, created_at) VALUES (?, ?, ?)",
+                    (selected_text_id, annotator, datetime.now().isoformat()),
+                )
+                conn.commit()
+            st.toast("Текст пропущен. Загружается следующий...")
+            st.rerun()
 
 st.markdown("### Статистика")
 with connect() as conn:
