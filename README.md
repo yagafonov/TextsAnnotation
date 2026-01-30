@@ -1,0 +1,67 @@
+# Texts Annotation
+
+Streamlit-приложение для разметки текстов с учетом требований:
+
+- Мульти-лейбл классификация с ответами **yes/no/unsure** по каждому кандидату.
+- Разметка минимум двумя разметчиками (счетчик хранится в БД).
+- Отбор topK классов по вероятностям без порогов.
+- Сохранение в БД версии модели, которая сформировала кандидатов.
+- Автодамп БД на диск и восстановление при перезапуске.
+- Заглушка для обучения новой версии модели на накопленных данных.
+- YAML-словарь интентов с описанием, сложностью и кластером (разбит по кластерам по файлам).
+
+## Запуск локально
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## Запуск в Docker
+
+```bash
+docker build -t texts-annotation .
+docker run --rm -p 8501:8501 -v $PWD/data:/app/data texts-annotation
+```
+
+## Переменные окружения
+
+- `TEXTS_DB_PATH` — путь до SQLite БД (по умолчанию `data/db/app.db`).
+- `TEXTS_DB_DUMP_PATH` — путь до дампа (по умолчанию `data/dumps/backup.sql`).
+- `TEXTS_DB_DUMP_INTERVAL_SEC` — интервал автодампа в секундах (по умолчанию `60`).
+- `TEXTS_TOP_K` — размер topK (по умолчанию `5`).
+- `TEXTS_MARGIN_THRESHOLD` — порог для `margin_error_rate`.
+- `TEXTS_INTENTS_PATH` — путь к папке с YAML-словарями интентов (по умолчанию `data/intents`).
+- `TEXTS_ANNOTATORS_PATH` — путь к YAML конфигу разметчиков (по умолчанию `data/annotators.yaml`).
+- `TEXTS_IMPORT_CSV_PATH` — путь к CSV файлу с входящими текстами (по умолчанию `data/requests.csv`).
+
+## Структура БД
+
+- `texts` — тексты, метаданные (язык, кластеры), версия данных.
+- `candidates` — topK кандидаты + вероятность и версия модели.
+- `annotations` — выборы разметчиков (включая метки вне topK).
+- `intents` — справочник интентов и их кластеров.
+- `model_versions` — версии моделей.
+- `settings` — текущие версии и настройки.
+
+## Формат CSV импорта
+
+CSV должен содержать столбец `request_text` и столбцы с именами интентов, где значения — это
+скоры от 0 до 1 (или от 0 до 10, тогда они будут нормализованы до 0..1).
+
+Пример заголовка:
+
+```
+request_text,intent_a,intent_b,intent_c
+```
+
+## Формат YAML конфигурации разметчиков
+
+```
+annotators:
+  - name: annotator_1
+    password: demo123
+    cluster: cash_withdrawal
+```
