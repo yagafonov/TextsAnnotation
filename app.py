@@ -277,28 +277,6 @@ with st.sidebar:
         st.warning("Введите корректный пароль для выбранного разметчика.")
 
     st.divider()
-    st.header("Импорт новых текстов")
-    new_text = st.text_area("Текст для разметки", height=120)
-    language = st.text_input("Язык фразы", value="ru")
-    clusters = st.text_input("Кластеры (через запятую)")
-    if st.button("Добавить текст") and new_text:
-        with connect() as conn:
-            model_version = int(get_setting(conn, "current_model_version", "0"))
-            data_version = int(get_setting(conn, "current_data_version", "0"))
-        candidates = model.predict(new_text)
-        assigned_cluster = determine_cluster(candidates, intents)
-        text_id = add_text(
-            new_text,
-            language,
-            clusters,
-            candidates,
-            model_version,
-            data_version,
-            assigned_cluster,
-        )
-        st.success(f"Текст добавлен (ID {text_id}).")
-
-    st.divider()
     st.header("Обучение модели (заглушка)")
     note = st.text_input("Комментарий к версии", value="training stub")
     if st.button("Запустить обучение"):
@@ -328,8 +306,8 @@ with connect() as conn:
         filters.append("t.assigned_cluster = ?")
         params.append(annotator_cluster)
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    texts = conn.execute(
-        f\"\"\"\n{base_query}\n{where_clause}\nGROUP BY t.id\nORDER BY t.created_at DESC\n\"\"\",\n        params,\n    ).fetchall()
+    query = f"{base_query} {where_clause} GROUP BY t.id ORDER BY t.created_at DESC"
+    texts = conn.execute(query, params).fetchall()
 
 if not texts:
     st.info("Добавьте тексты для разметки.")
@@ -411,7 +389,8 @@ if st.button("Сохранить разметку"):
         st.error("Укажите имя разметчика в боковой панели.")
     else:
         save_annotations(selected_text_id, annotator, decisions, candidate_labels, extra_labels)
-        st.success("Разметка сохранена.")
+        st.toast("Разметка сохранена. Загружается следующий текст...")
+        st.rerun()
 
 st.markdown("### Статистика")
 with connect() as conn:
