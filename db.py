@@ -1,11 +1,10 @@
 import os
 import sqlite3
 import threading
-import time
 from contextlib import contextmanager
 
-DEFAULT_DB_PATH = os.environ.get("TEXTS_DB_PATH", "data/app.db")
-DEFAULT_DUMP_PATH = os.environ.get("TEXTS_DB_DUMP_PATH", "data/backup.sql")
+DEFAULT_DB_PATH = os.environ.get("TEXTS_DB_PATH", "data/db/app.db")
+DEFAULT_DUMP_PATH = os.environ.get("TEXTS_DB_DUMP_PATH", "data/dumps/backup.sql")
 DEFAULT_DUMP_INTERVAL_SEC = int(os.environ.get("TEXTS_DB_DUMP_INTERVAL_SEC", "60"))
 
 _dump_thread = None
@@ -77,6 +76,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
                 text TEXT NOT NULL,
                 language TEXT,
                 clusters TEXT,
+                assigned_cluster TEXT,
                 data_version INTEGER NOT NULL,
                 created_at TEXT NOT NULL
             )
@@ -122,6 +122,19 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS intents (
+                label TEXT PRIMARY KEY,
+                description TEXT,
+                examples TEXT,
+                complexity TEXT,
+                cluster TEXT,
+                source_file TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -129,6 +142,7 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             """
         )
         conn.commit()
+        ensure_column(conn, "texts", "assigned_cluster", "TEXT")
 
         if not conn.execute("SELECT 1 FROM model_versions LIMIT 1").fetchone():
             conn.execute(
@@ -138,6 +152,40 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("current_model_version", "0"))
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", ("current_data_version", "0"))
             conn.commit()
+
+
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, column_type: str) -> None:
+    existing = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    if any(row["name"] == column for row in existing):
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+    conn.commit()
+
+
+def upsert_intent(
+    conn: sqlite3.Connection,
+    label: str,
+    description: str,
+    examples: str,
+    complexity: str,
+    cluster: str,
+    source_file: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO intents (label, description, examples, complexity, cluster, source_file, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(label) DO UPDATE SET
+            description=excluded.description,
+            examples=excluded.examples,
+            complexity=excluded.complexity,
+            cluster=excluded.cluster,
+            source_file=excluded.source_file,
+            updated_at=datetime('now')
+        """,
+        (label, description, examples, complexity, cluster, source_file),
+    )
+    conn.commit()
 
 
 

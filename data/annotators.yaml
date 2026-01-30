@@ -1,0 +1,7 @@
+annotators:
+  - name: annotator_1
+    password: demo123
+    cluster: cash_withdrawal
+  - name: annotator_2
+    password: demo123
+    cluster: card_recovery

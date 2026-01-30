@@ -1,6 +1,7 @@
+import csv
 import os
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import streamlit as st
 import yaml
@@ -16,10 +17,13 @@ from db import (
     init_db,
     restore_from_dump_if_needed,
     start_auto_dump,
+    upsert_intent,
 )
 from modeling import Candidate, TopKModelStub, compute_metrics
 
-INTENTS_PATH = os.environ.get("TEXTS_INTENTS_PATH", "data/intents.yaml")
+INTENTS_PATH = os.environ.get("TEXTS_INTENTS_PATH", "data/intents")
+ANNOTATORS_PATH = os.environ.get("TEXTS_ANNOTATORS_PATH", "data/annotators.yaml")
+IMPORT_CSV_PATH = os.environ.get("TEXTS_IMPORT_CSV_PATH", "data/requests.csv")
 MARGIN_THRESHOLD = float(os.environ.get("TEXTS_MARGIN_THRESHOLD", "0.1"))
 
 
@@ -29,16 +33,128 @@ def _load_yaml_file(path: str) -> Dict[str, dict]:
 
 
 @st.cache_resource
-def load_intents(path: str) -> Dict[str, dict]:
+def load_intents(path: str) -> Tuple[Dict[str, dict], Dict[str, str]]:
+    intents: Dict[str, dict] = {}
+    intent_sources: Dict[str, str] = {}
     if os.path.isdir(path):
-        intents: Dict[str, dict] = {}
         for filename in sorted(os.listdir(path)):
             if not filename.lower().endswith((".yaml", ".yml")):
                 continue
             file_path = os.path.join(path, filename)
-            intents.update(_load_yaml_file(file_path))
-        return intents
-    return _load_yaml_file(path)
+            cluster_name = os.path.splitext(filename)[0]
+            file_intents = _load_yaml_file(file_path)
+            for label, payload in file_intents.items():
+                payload = payload or {}
+                payload.setdefault("cluster", cluster_name)
+                intents[label] = payload
+                intent_sources[label] = filename
+        return intents, intent_sources
+    single_intents = _load_yaml_file(path)
+    for label, payload in single_intents.items():
+        intents[label] = payload or {}
+        intent_sources[label] = os.path.basename(path)
+    return intents, intent_sources
+
+
+def load_annotators(path: str) -> List[dict]:
+    if not os.path.exists(path):
+        return []
+    data = _load_yaml_file(path)
+    if isinstance(data, dict) and "annotators" in data:
+        return data["annotators"] or []
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def normalize_scores(scores: Dict[str, float]) -> Dict[str, float]:
+    if not scores:
+        return {}
+    max_score = max(scores.values())
+    divider = 10.0 if max_score > 1 else 1.0
+    return {label: value / divider for label, value in scores.items()}
+
+
+def select_top_k(scores: Dict[str, float], top_k: int) -> List[Candidate]:
+    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
+    return [Candidate(label=label, rank=idx + 1, probability=score) for idx, (label, score) in enumerate(ranked)]
+
+
+def determine_cluster(candidates: List[Candidate], intents: Dict[str, dict]) -> str:
+    cluster_counts: Dict[str, float] = {}
+    for candidate in candidates:
+        cluster = intents.get(candidate.label, {}).get("cluster")
+        if not cluster:
+            continue
+        cluster_counts[cluster] = cluster_counts.get(cluster, 0.0) + candidate.probability
+    if not cluster_counts:
+        return "unknown"
+    return max(cluster_counts.items(), key=lambda item: item[1])[0]
+
+
+def import_texts_from_csv(
+    path: str,
+    intents: Dict[str, dict],
+    top_k: int,
+) -> int:
+    if not os.path.exists(path):
+        return 0
+    added = 0
+    with open(path, "r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if "request_text" not in reader.fieldnames:
+            return 0
+        for row in reader:
+            request_text = (row.get("request_text") or "").strip()
+            if not request_text:
+                continue
+            raw_scores: Dict[str, float] = {}
+            for key, value in row.items():
+                if key == "request_text" or value is None:
+                    continue
+                if key not in intents:
+                    continue
+                try:
+                    raw_scores[key] = float(value)
+                except ValueError:
+                    continue
+            scores = normalize_scores(raw_scores)
+            candidates = select_top_k(scores, top_k)
+            if not candidates:
+                continue
+            assigned_cluster = determine_cluster(candidates, intents)
+            with connect() as conn:
+                existing = conn.execute("SELECT id FROM texts WHERE text = ?", (request_text,)).fetchone()
+                if existing:
+                    continue
+                model_version = int(get_setting(conn, "current_model_version", "0"))
+                data_version = int(get_setting(conn, "current_data_version", "0"))
+                cursor = conn.execute(
+                    """
+                    INSERT INTO texts (text, language, clusters, assigned_cluster, data_version, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (request_text, None, None, assigned_cluster, data_version, datetime.utcnow().isoformat()),
+                )
+                text_id = cursor.lastrowid
+                for candidate in candidates:
+                    conn.execute(
+                        """
+                        INSERT INTO candidates (text_id, label, rank, probability, model_version, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            text_id,
+                            candidate.label,
+                            candidate.rank,
+                            candidate.probability,
+                            model_version,
+                            datetime.utcnow().isoformat(),
+                        ),
+                    )
+                conn.commit()
+                added += 1
+    return added
 
 
 @st.cache_resource
@@ -46,9 +162,22 @@ def init_services():
     restore_from_dump_if_needed(DEFAULT_DB_PATH, DEFAULT_DUMP_PATH)
     init_db(DEFAULT_DB_PATH)
     start_auto_dump(DEFAULT_DB_PATH, DEFAULT_DUMP_PATH, DEFAULT_DUMP_INTERVAL_SEC)
-    intents = load_intents(INTENTS_PATH)
+    intents, intent_sources = load_intents(INTENTS_PATH)
+    with connect() as conn:
+        for label, payload in intents.items():
+            upsert_intent(
+                conn,
+                label=label,
+                description=payload.get("description", ""),
+                examples=", ".join(payload.get("train", []) or []),
+                complexity=str(payload.get("complexity", "")),
+                cluster=str(payload.get("cluster", "")),
+                source_file=intent_sources.get(label, ""),
+            )
     model = TopKModelStub(intents)
-    return intents, model
+    import_texts_from_csv(IMPORT_CSV_PATH, intents, model.top_k)
+    annotators = load_annotators(ANNOTATORS_PATH)
+    return intents, model, annotators
 
 
 def add_text(
@@ -58,11 +187,15 @@ def add_text(
     candidates: List[Candidate],
     model_version: int,
     data_version: int,
+    assigned_cluster: str | None = None,
 ) -> int:
     with connect() as conn:
         cursor = conn.execute(
-            "INSERT INTO texts (text, language, clusters, data_version, created_at) VALUES (?, ?, ?, ?, ?)",
-            (text, language, clusters, data_version, datetime.utcnow().isoformat()),
+            """
+            INSERT INTO texts (text, language, clusters, assigned_cluster, data_version, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (text, language, clusters, assigned_cluster, data_version, datetime.utcnow().isoformat()),
         )
         text_id = cursor.lastrowid
         for candidate in candidates:
@@ -127,15 +260,21 @@ def save_annotations(
 
 st.set_page_config(page_title="Texts Annotation", layout="wide")
 
-intents, model = init_services()
+intents, model, annotators = init_services()
 
 st.title("Платформа разметки текстов")
 
 with st.sidebar:
-    st.header("Настройки разметчика")
-    annotator = st.text_input("Имя разметчика", value=st.session_state.get("annotator", ""))
-    if annotator:
-        st.session_state["annotator"] = annotator
+    st.header("Вход разметчика")
+    annotator_names = [item.get("name") for item in annotators]
+    annotator_names = [name for name in annotator_names if name]
+    annotator = st.selectbox("Разметчик", annotator_names) if annotator_names else st.text_input("Имя разметчика")
+    password = st.text_input("Пароль", type="password")
+    selected_annotator = next((item for item in annotators if item.get("name") == annotator), {})
+    annotator_cluster = selected_annotator.get("cluster")
+    password_ok = bool(selected_annotator) and password == selected_annotator.get("password")
+    if annotators and not password_ok:
+        st.warning("Введите корректный пароль для выбранного разметчика.")
 
     st.divider()
     st.header("Импорт новых текстов")
@@ -147,7 +286,16 @@ with st.sidebar:
             model_version = int(get_setting(conn, "current_model_version", "0"))
             data_version = int(get_setting(conn, "current_data_version", "0"))
         candidates = model.predict(new_text)
-        text_id = add_text(new_text, language, clusters, candidates, model_version, data_version)
+        assigned_cluster = determine_cluster(candidates, intents)
+        text_id = add_text(
+            new_text,
+            language,
+            clusters,
+            candidates,
+            model_version,
+            data_version,
+            assigned_cluster,
+        )
         st.success(f"Текст добавлен (ID {text_id}).")
 
     st.divider()
@@ -160,23 +308,37 @@ with st.sidebar:
         st.info(f"Создана модель версии {new_model_version}. Новая версия данных: {new_data_version}.")
 
 st.subheader("Список текстов")
+if annotators and not password_ok:
+    st.stop()
+
+show_all = st.checkbox("Показать все тексты (без фильтра по кластеру)")
 with connect() as conn:
-    texts = conn.execute(
-        """
-        SELECT t.id, t.text, t.language, t.clusters, t.data_version, t.created_at,
+    base_query = """
+        SELECT t.id, t.text, t.language, t.clusters, t.assigned_cluster, t.data_version, t.created_at,
                COUNT(DISTINCT a.annotator) as annotators
         FROM texts t
         LEFT JOIN annotations a ON a.text_id = t.id
-        GROUP BY t.id
-        ORDER BY t.created_at DESC
-        """
-    ).fetchall()
+    """
+    filters = []
+    params: List[str] = []
+    if annotator:
+        filters.append("NOT EXISTS (SELECT 1 FROM annotations a2 WHERE a2.text_id = t.id AND a2.annotator = ?)")
+        params.append(annotator)
+    if annotator_cluster and not show_all:
+        filters.append("t.assigned_cluster = ?")
+        params.append(annotator_cluster)
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+    texts = conn.execute(
+        f\"\"\"\n{base_query}\n{where_clause}\nGROUP BY t.id\nORDER BY t.created_at DESC\n\"\"\",\n        params,\n    ).fetchall()
 
 if not texts:
     st.info("Добавьте тексты для разметки.")
     st.stop()
 
-text_options = {f"#{row['id']} ({row['annotators']} разметчика)": row["id"] for row in texts}
+text_options = {
+    f"#{row['id']} [{row['assigned_cluster'] or 'unknown'}] ({row['annotators']} разметчика)": row["id"]
+    for row in texts
+}
 selected_label = st.selectbox("Выберите текст для разметки", list(text_options.keys()))
 selected_text_id = text_options[selected_label]
 
@@ -195,7 +357,14 @@ st.markdown("### Текст")
 st.write(text_row["text"])
 
 st.caption(
-    f"Язык: {text_row['language']} | Кластеры: {text_row['clusters'] or '-'} | Версия данных: {text_row['data_version']}"
+    " | ".join(
+        [
+            f"Язык: {text_row['language']}",
+            f"Кластеры: {text_row['clusters'] or '-'}",
+            f"Назначенный кластер: {text_row['assigned_cluster'] or '-'}",
+            f"Версия данных: {text_row['data_version']}",
+        ]
+    )
 )
 
 candidate_labels = [row["label"] for row in candidates_rows]

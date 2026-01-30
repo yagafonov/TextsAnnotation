@@ -7,11 +7,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . ./
 
-ENV TEXTS_DB_PATH=/app/data/app.db \
-    TEXTS_DB_DUMP_PATH=/app/data/backup.sql \
+ENV TEXTS_DB_PATH=/app/data/db/app.db \
+    TEXTS_DB_DUMP_PATH=/app/data/dumps/backup.sql \
     TEXTS_DB_DUMP_INTERVAL_SEC=60 \
     TEXTS_TOP_K=5 \
-    TEXTS_MARGIN_THRESHOLD=0.1
+    TEXTS_MARGIN_THRESHOLD=0.1 \
+    TEXTS_INTENTS_PATH=/app/data/intents \
+    TEXTS_ANNOTATORS_PATH=/app/data/annotators.yaml \
+    TEXTS_IMPORT_CSV_PATH=/app/data/requests.csv
 
 EXPOSE 8501
 
