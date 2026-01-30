@@ -112,6 +112,12 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         )
         conn.execute(
             """
+            CREATE UNIQUE INDEX IF NOT EXISTS annotations_unique_entry
+            ON annotations (text_id, annotator, label)
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS model_versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 version INTEGER NOT NULL,

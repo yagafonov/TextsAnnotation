@@ -1,13 +1,13 @@
 import os
-from datetime import datetime, timedelta
 from typing import Dict, List
 
 import pandas as pd
 import streamlit as st
 
-from db import connect
+from db import connect, create_data_version, create_model_version
 
 ADMIN_PASSWORD = os.environ.get("TEXTS_ADMIN_PASSWORD", "admin123")
+MIN_ANNOTATORS = int(os.environ.get("TEXTS_MIN_ANNOTATORS", "2"))
 
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
 
@@ -26,7 +26,17 @@ def load_overview_stats() -> Dict:
     with connect() as conn:
         total_texts = conn.execute("SELECT COUNT(*) as cnt FROM texts").fetchone()["cnt"]
         texts_with_annotations = conn.execute(
-            "SELECT COUNT(DISTINCT text_id) as cnt FROM annotations"
+            """
+            SELECT COUNT(*) as cnt
+            FROM texts t
+            LEFT JOIN (
+                SELECT text_id, COUNT(DISTINCT annotator) as annotators_cnt
+                FROM annotations
+                GROUP BY text_id
+            ) a ON a.text_id = t.id
+            WHERE COALESCE(a.annotators_cnt, 0) >= ?
+            """,
+            (MIN_ANNOTATORS,),
         ).fetchone()["cnt"]
         total_annotations = conn.execute("SELECT COUNT(*) as cnt FROM annotations").fetchone()["cnt"]
         unique_annotators = conn.execute(
@@ -183,13 +193,19 @@ def load_cluster_progress() -> pd.DataFrame:
             SELECT
                 t.assigned_cluster,
                 COUNT(DISTINCT t.id) as total_texts,
-                COUNT(DISTINCT CASE WHEN a.id IS NOT NULL THEN t.id END) as annotated_texts,
+                COUNT(DISTINCT CASE WHEN COALESCE(ac.annotators_cnt, 0) >= ? THEN t.id END) as annotated_texts,
                 COUNT(DISTINCT a.annotator) as annotators_involved
             FROM texts t
+            LEFT JOIN (
+                SELECT text_id, COUNT(DISTINCT annotator) as annotators_cnt
+                FROM annotations
+                GROUP BY text_id
+            ) ac ON ac.text_id = t.id
             LEFT JOIN annotations a ON a.text_id = t.id
             GROUP BY t.assigned_cluster
             ORDER BY total_texts DESC
-            """
+            """,
+            (MIN_ANNOTATORS,),
         ).fetchall()
     df = pd.DataFrame(rows, columns=[
         "cluster", "total_texts", "annotated_texts", "annotators_involved"
@@ -335,8 +351,8 @@ stats = load_overview_stats()
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Всего текстов", stats["total_texts"])
-col2.metric("Размечено текстов", stats["texts_with_annotations"])
-col3.metric("Ожидают разметки", stats["pending_texts"])
+col2.metric(f"Размечено текстов (≥{MIN_ANNOTATORS})", stats["texts_with_annotations"])
+col3.metric(f"Ожидают разметки (<{MIN_ANNOTATORS})", stats["pending_texts"])
 col4.metric("Всего аннотаций", stats["total_annotations"])
 
 st.subheader("Тексты по кластерам")
@@ -662,6 +678,15 @@ if not disagreements.empty:
     )
 else:
     st.success("Разногласий не найдено.")
+
+# Model Training Stub (Admin only)
+st.header("Управление версиями модели")
+note = st.text_input("Комментарий к версии", value="training stub", key="admin_training_note")
+if st.button("Создать новую версию модели"):
+    with connect() as conn:
+        new_model_version = create_model_version(conn, note)
+        new_data_version = create_data_version(conn)
+    st.info(f"Создана модель версии {new_model_version}. Новая версия данных: {new_data_version}.")
 
 # Data Export
 st.header("Экспорт данных")
