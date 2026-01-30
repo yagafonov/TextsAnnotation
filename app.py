@@ -11,8 +11,6 @@ from db import (
     DEFAULT_DUMP_INTERVAL_SEC,
     DEFAULT_DUMP_PATH,
     connect,
-    create_data_version,
-    create_model_version,
     get_setting,
     init_db,
     restore_from_dump_if_needed,
@@ -25,6 +23,7 @@ INTENTS_PATH = os.environ.get("TEXTS_INTENTS_PATH", "data/intents")
 ANNOTATORS_PATH = os.environ.get("TEXTS_ANNOTATORS_PATH", "data/annotators.yaml")
 IMPORT_CSV_PATH = os.environ.get("TEXTS_IMPORT_CSV_PATH", "data/requests.csv")
 MARGIN_THRESHOLD = float(os.environ.get("TEXTS_MARGIN_THRESHOLD", "0.1"))
+MIN_ANNOTATORS = int(os.environ.get("TEXTS_MIN_ANNOTATORS", "2"))
 
 
 def _load_yaml_file(path: str) -> Dict[str, dict]:
@@ -64,6 +63,18 @@ def load_annotators(path: str) -> List[dict]:
         return data["annotators"] or []
     if isinstance(data, list):
         return data
+    return []
+
+
+def normalize_clusters(annotator: dict) -> List[str]:
+    clusters = annotator.get("clusters")
+    if isinstance(clusters, str):
+        return [item.strip() for item in clusters.split(",") if item.strip()]
+    if isinstance(clusters, list):
+        return [str(item).strip() for item in clusters if str(item).strip()]
+    cluster = annotator.get("cluster")
+    if cluster:
+        return [str(cluster).strip()]
     return []
 
 
@@ -228,7 +239,7 @@ def save_annotations(
         for label, decision in decisions.items():
             conn.execute(
                 """
-                INSERT INTO annotations (text_id, annotator, label, decision, is_candidate, created_at)
+                INSERT OR REPLACE INTO annotations (text_id, annotator, label, decision, is_candidate, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -243,7 +254,7 @@ def save_annotations(
         for label in extra_labels:
             conn.execute(
                 """
-                INSERT INTO annotations (text_id, annotator, label, decision, is_candidate, created_at)
+                INSERT OR REPLACE INTO annotations (text_id, annotator, label, decision, is_candidate, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -271,37 +282,34 @@ with st.sidebar:
     annotator = st.selectbox("Разметчик", annotator_names) if annotator_names else st.text_input("Имя разметчика")
     password = st.text_input("Пароль", type="password")
     selected_annotator = next((item for item in annotators if item.get("name") == annotator), {})
-    annotator_cluster = selected_annotator.get("cluster")
+    annotator_clusters = normalize_clusters(selected_annotator)
+    annotator_cluster = None
+    if annotator_clusters:
+        annotator_cluster = st.selectbox("Активный кластер", annotator_clusters)
     password_ok = bool(selected_annotator) and password == selected_annotator.get("password")
     if annotators and not password_ok:
         st.warning("Введите корректный пароль для выбранного разметчика.")
-
-    st.divider()
-    st.header("Обучение модели (заглушка)")
-    note = st.text_input("Комментарий к версии", value="training stub")
-    if st.button("Запустить обучение"):
-        with connect() as conn:
-            new_model_version = create_model_version(conn, note)
-            new_data_version = create_data_version(conn)
-        st.info(f"Создана модель версии {new_model_version}. Новая версия данных: {new_data_version}.")
 
 st.subheader("Список текстов")
 if annotators and not password_ok:
     st.stop()
 
-col_filter1, col_filter2 = st.columns(2)
-with col_filter1:
-    show_all = st.checkbox("Показать все тексты (без фильтра по кластеру)")
-with col_filter2:
-    show_skipped = st.checkbox("Показать пропущенные тексты")
+show_skipped = st.checkbox("Показать пропущенные тексты")
 
 with connect() as conn:
     if show_skipped and annotator:
         # Show only skipped texts for this annotator
         base_query = """
-            SELECT t.id, t.text, t.language, t.clusters, t.assigned_cluster, t.data_version, t.created_at,
-                   COUNT(DISTINCT a.annotator) as annotators,
-                   1 as is_skipped
+            SELECT
+                t.id,
+                t.text,
+                t.language,
+                t.clusters,
+                t.assigned_cluster,
+                t.data_version,
+                t.created_at,
+                COUNT(DISTINCT a.annotator) as annotators,
+                1 as is_skipped
             FROM texts t
             LEFT JOIN annotations a ON a.text_id = t.id
             INNER JOIN skipped_texts s ON s.text_id = t.id AND s.annotator = ?
@@ -311,17 +319,24 @@ with connect() as conn:
         # Exclude already annotated by this user
         filters.append("NOT EXISTS (SELECT 1 FROM annotations a2 WHERE a2.text_id = t.id AND a2.annotator = ?)")
         params.append(annotator)
-        if annotator_cluster and not show_all:
+        if annotator_cluster:
             filters.append("t.assigned_cluster = ?")
             params.append(annotator_cluster)
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-        query = f"{base_query} {where_clause} GROUP BY t.id ORDER BY t.created_at DESC"
-        texts = conn.execute(query, params).fetchall()
+        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY t.created_at DESC"
+        texts = conn.execute(query, params + [MIN_ANNOTATORS]).fetchall()
     else:
         # Normal mode - show unannotated and unskipped texts
         base_query = """
-            SELECT t.id, t.text, t.language, t.clusters, t.assigned_cluster, t.data_version, t.created_at,
-                   COUNT(DISTINCT a.annotator) as annotators
+            SELECT
+                t.id,
+                t.text,
+                t.language,
+                t.clusters,
+                t.assigned_cluster,
+                t.data_version,
+                t.created_at,
+                COUNT(DISTINCT a.annotator) as annotators
             FROM texts t
             LEFT JOIN annotations a ON a.text_id = t.id
         """
@@ -332,12 +347,12 @@ with connect() as conn:
             params.append(annotator)
             filters.append("NOT EXISTS (SELECT 1 FROM skipped_texts s WHERE s.text_id = t.id AND s.annotator = ?)")
             params.append(annotator)
-        if annotator_cluster and not show_all:
+        if annotator_cluster:
             filters.append("t.assigned_cluster = ?")
             params.append(annotator_cluster)
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-        query = f"{base_query} {where_clause} GROUP BY t.id ORDER BY t.created_at DESC"
-        texts = conn.execute(query, params).fetchall()
+        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY t.created_at DESC"
+        texts = conn.execute(query, params + [MIN_ANNOTATORS]).fetchall()
 
 if not texts:
     if show_skipped:
@@ -370,6 +385,16 @@ with connect() as conn:
         "SELECT * FROM annotations WHERE text_id = ?",
         (selected_text_id,),
     ).fetchall()
+
+if annotator_cluster:
+    candidates_rows = [
+        row
+        for row in candidates_rows
+        if intents.get(row["label"], {}).get("cluster") == annotator_cluster
+    ]
+    if not candidates_rows:
+        st.info("Для выбранного кластера нет кандидатов. Выберите другой кластер.")
+        st.stop()
 
 st.markdown("### Текст")
 st.write(text_row["text"])
@@ -423,7 +448,10 @@ with col2:
             f"сложность={label_info.get('complexity', '-')}, кластер={label_info.get('cluster', '-') }"
         )
 
-all_intents = list(intents.keys())
+if annotator_cluster:
+    all_intents = [label for label, payload in intents.items() if payload.get("cluster") == annotator_cluster]
+else:
+    all_intents = list(intents.keys())
 extra_labels = st.multiselect(
     "Дополнительные метки вне topK",
     [label for label in all_intents if label not in candidate_labels],
