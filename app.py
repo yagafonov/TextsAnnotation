@@ -420,14 +420,12 @@ with col1:
     for row in candidates_rows:
         label = row["label"]
         label_info = intents.get(label, {})
-        decision = st.radio(
+        is_yes = st.checkbox(
             f"{label}",
-            ["yes", "no", "unsure"],
-            index=1,
-            horizontal=True,
+            value=False,
             key=f"decision_{selected_text_id}_{label}",
         )
-        decisions[label] = decision
+        decisions[label] = "yes" if is_yes else "no"
         with st.expander("Описание интента"):
             st.write(label_info.get("description", "Нет описания."))
             examples = label_info.get("train", [])[:5]

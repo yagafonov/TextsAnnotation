@@ -69,7 +69,6 @@ def load_annotator_stats() -> pd.DataFrame:
                 COUNT(DISTINCT text_id) as texts_annotated,
                 SUM(CASE WHEN decision = 'yes' THEN 1 ELSE 0 END) as yes_count,
                 SUM(CASE WHEN decision = 'no' THEN 1 ELSE 0 END) as no_count,
-                SUM(CASE WHEN decision = 'unsure' THEN 1 ELSE 0 END) as unsure_count,
                 MIN(created_at) as first_annotation,
                 MAX(created_at) as last_annotation
             FROM annotations
@@ -79,7 +78,7 @@ def load_annotator_stats() -> pd.DataFrame:
         ).fetchall()
     return pd.DataFrame(rows, columns=[
         "annotator", "total_annotations", "texts_annotated",
-        "yes_count", "no_count", "unsure_count",
+        "yes_count", "no_count",
         "first_annotation", "last_annotation"
     ])
 
@@ -95,7 +94,6 @@ def load_intent_stats() -> pd.DataFrame:
                 COUNT(DISTINCT c.text_id) as times_in_topk,
                 SUM(CASE WHEN a.decision = 'yes' THEN 1 ELSE 0 END) as yes_count,
                 SUM(CASE WHEN a.decision = 'no' THEN 1 ELSE 0 END) as no_count,
-                SUM(CASE WHEN a.decision = 'unsure' THEN 1 ELSE 0 END) as unsure_count,
                 COUNT(a.id) as total_votes,
                 AVG(c.probability) as avg_probability,
                 AVG(c.rank) as avg_rank
@@ -108,19 +106,14 @@ def load_intent_stats() -> pd.DataFrame:
         ).fetchall()
     df = pd.DataFrame(rows, columns=[
         "label", "cluster", "complexity", "times_in_topk",
-        "yes_count", "no_count", "unsure_count", "total_votes",
+        "yes_count", "no_count", "total_votes",
         "avg_probability", "avg_rank"
     ])
     df["yes_count"] = df["yes_count"].fillna(0).astype(int)
     df["no_count"] = df["no_count"].fillna(0).astype(int)
-    df["unsure_count"] = df["unsure_count"].fillna(0).astype(int)
     df["total_votes"] = df["total_votes"].fillna(0).astype(int)
     df["precision"] = df.apply(
         lambda row: row["yes_count"] / row["total_votes"] if row["total_votes"] > 0 else None,
-        axis=1
-    )
-    df["unsure_rate"] = df.apply(
-        lambda row: row["unsure_count"] / row["total_votes"] if row["total_votes"] > 0 else None,
         axis=1
     )
     return df
@@ -239,7 +232,7 @@ def load_intent_model_quality() -> pd.DataFrame:
     Per-intent model quality metrics:
     - top1_precision: when intent is rank 1, how often marked 'yes'
     - top1_count: how many times intent was rank 1
-    - missed_opportunity: when intent is rank 2-N and top1 is 'no'/'unsure',
+    - missed_opportunity: when intent is rank 2-N and top1 is 'no',
                           how often this intent is marked 'yes'
     """
     with connect() as conn:
@@ -250,8 +243,7 @@ def load_intent_model_quality() -> pd.DataFrame:
                 c.label,
                 COUNT(DISTINCT c.text_id || '-' || a.annotator) as top1_count,
                 SUM(CASE WHEN a.decision = 'yes' THEN 1 ELSE 0 END) as top1_yes,
-                SUM(CASE WHEN a.decision = 'no' THEN 1 ELSE 0 END) as top1_no,
-                SUM(CASE WHEN a.decision = 'unsure' THEN 1 ELSE 0 END) as top1_unsure
+                SUM(CASE WHEN a.decision = 'no' THEN 1 ELSE 0 END) as top1_no
             FROM candidates c
             JOIN annotations a ON a.text_id = c.text_id AND a.label = c.label
             WHERE c.rank = 1
@@ -259,7 +251,7 @@ def load_intent_model_quality() -> pd.DataFrame:
             """
         ).fetchall()
 
-        # Get missed opportunities: intent is rank 2-N, top1 is no/unsure, this intent is yes
+        # Get missed opportunities: intent is rank 2-N, top1 is no, this intent is yes
         missed_stats = conn.execute(
             """
             SELECT
@@ -274,7 +266,7 @@ def load_intent_model_quality() -> pd.DataFrame:
                 AND a_other.label = c_other.label
                 AND a_other.annotator = a_top1.annotator
             WHERE c_top1.rank = 1
-                AND a_top1.decision IN ('no', 'unsure')
+                AND a_top1.decision = 'no'
                 AND a_other.decision = 'yes'
             GROUP BY c_other.label
             """
@@ -292,7 +284,7 @@ def load_intent_model_quality() -> pd.DataFrame:
             JOIN annotations a_top1 ON a_top1.text_id = c_top1.text_id
                 AND a_top1.label = c_top1.label
             WHERE c_top1.rank = 1
-                AND a_top1.decision IN ('no', 'unsure')
+                AND a_top1.decision = 'no'
             GROUP BY c_other.label
             """
         ).fetchall()
@@ -304,8 +296,8 @@ def load_intent_model_quality() -> pd.DataFrame:
 
     # Build dataframes
     top1_df = pd.DataFrame(top1_stats, columns=[
-        "label", "top1_count", "top1_yes", "top1_no", "top1_unsure"
-    ]) if top1_stats else pd.DataFrame(columns=["label", "top1_count", "top1_yes", "top1_no", "top1_unsure"])
+        "label", "top1_count", "top1_yes", "top1_no"
+    ]) if top1_stats else pd.DataFrame(columns=["label", "top1_count", "top1_yes", "top1_no"])
 
     missed_df = pd.DataFrame(missed_stats, columns=[
         "label", "missed_opportunity_count"
@@ -325,16 +317,12 @@ def load_intent_model_quality() -> pd.DataFrame:
     result = result.merge(cluster_df, on="label", how="left")
 
     # Fill NaN with 0
-    for col in ["top1_count", "top1_yes", "top1_no", "top1_unsure", "missed_opportunity_count", "potential_count"]:
+    for col in ["top1_count", "top1_yes", "top1_no", "missed_opportunity_count", "potential_count"]:
         result[col] = result[col].fillna(0).astype(int)
 
     # Calculate metrics
     result["top1_precision"] = result.apply(
         lambda r: r["top1_yes"] / r["top1_count"] if r["top1_count"] > 0 else None,
-        axis=1
-    )
-    result["top1_error_rate"] = result.apply(
-        lambda r: r["top1_no"] / r["top1_count"] if r["top1_count"] > 0 else None,
         axis=1
     )
     result["missed_rate"] = result.apply(
@@ -389,7 +377,6 @@ if not annotator_stats.empty:
             "texts_annotated": "Текстов размечено",
             "yes_count": "Yes",
             "no_count": "No",
-            "unsure_count": "Unsure",
             "first_annotation": "Первая аннотация",
             "last_annotation": "Последняя аннотация"
         }),
@@ -444,8 +431,7 @@ st.header("Качество модели по интентам")
 st.markdown("""
 Метрики для понимания, какие интенты модель предсказывает хорошо, а какие — плохо:
 - **Top-1 Precision** — когда интент на 1 месте, как часто разметчик ставит "yes"
-- **Top-1 Error Rate** — когда интент на 1 месте, как часто разметчик ставит "no"
-- **Missed Rate** — когда интент на 2-N месте И top-1 отвергнут (no/unsure), как часто этот интент получает "yes"
+- **Missed Rate** — когда интент на 2-N месте И top-1 отвергнут (no), как часто этот интент получает "yes"
   (высокий missed rate = модель часто ставит этот интент ниже, чем нужно)
 """)
 
@@ -467,7 +453,6 @@ if not model_quality.empty:
             "По Top-1 частоте (↓)": ("top1_count", False),
             "По Top-1 Precision (↑)": ("top1_precision", True),
             "По Top-1 Precision (↓)": ("top1_precision", False),
-            "По Top-1 Error Rate (↓)": ("top1_error_rate", False),
             "По Missed Rate (↓)": ("missed_rate", False),
         }
         mq_sort_by = st.selectbox("Сортировка", list(mq_sort_options.keys()), key="mq_sort")
@@ -475,23 +460,20 @@ if not model_quality.empty:
         mq_filtered = mq_filtered.sort_values(sort_col, ascending=sort_asc, na_position="last")
 
     st.dataframe(
-        mq_filtered[["label", "cluster", "top1_count", "top1_yes", "top1_no", "top1_unsure",
-                     "top1_precision", "top1_error_rate", "potential_count",
+        mq_filtered[["label", "cluster", "top1_count", "top1_yes", "top1_no",
+                     "top1_precision", "potential_count",
                      "missed_opportunity_count", "missed_rate"]].rename(columns={
             "label": "Интент",
             "cluster": "Кластер",
             "top1_count": "Top-1 раз",
             "top1_yes": "Top-1 Yes",
             "top1_no": "Top-1 No",
-            "top1_unsure": "Top-1 Unsure",
             "top1_precision": "Top-1 Precision",
-            "top1_error_rate": "Top-1 Error Rate",
             "potential_count": "Потенц. пропусков",
             "missed_opportunity_count": "Факт. пропусков",
             "missed_rate": "Missed Rate"
         }).style.format({
             "Top-1 Precision": "{:.1%}",
-            "Top-1 Error Rate": "{:.1%}",
             "Missed Rate": "{:.1%}"
         }, na_rep="-"),
         use_container_width=True
@@ -499,7 +481,7 @@ if not model_quality.empty:
 
     # Highlight problematic intents
     st.subheader("Интенты, требующие внимания")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
         st.markdown("**Низкий Top-1 Precision**")
@@ -532,26 +514,6 @@ if not model_quality.empty:
                 use_container_width=True,
                 hide_index=True
             )
-
-    with col3:
-        st.markdown("**Высокий Top-1 Unsure**")
-        st.caption("Разметчикам сложно решить")
-        model_quality["top1_unsure_rate"] = model_quality.apply(
-            lambda r: r["top1_unsure"] / r["top1_count"] if r["top1_count"] > 0 else None,
-            axis=1
-        )
-        high_unsure_top1 = model_quality[model_quality["top1_count"] >= 3].nlargest(10, "top1_unsure_rate")
-        if not high_unsure_top1.empty:
-            st.dataframe(
-                high_unsure_top1[["label", "top1_unsure_rate", "top1_unsure", "top1_count"]].rename(columns={
-                    "label": "Интент",
-                    "top1_unsure_rate": "Unsure Rate",
-                    "top1_unsure": "Unsure",
-                    "top1_count": "Top-1 раз"
-                }).style.format({"Unsure Rate": "{:.1%}"}, na_rep="-"),
-                use_container_width=True,
-                hide_index=True
-            )
 else:
     st.info("Недостаточно данных для расчета метрик качества модели.")
 
@@ -579,8 +541,6 @@ if not intent_stats.empty:
             "По частоте в topK": "times_in_topk",
             "По precision (↑)": "precision",
             "По precision (↓)": "precision",
-            "По unsure rate (↑)": "unsure_rate",
-            "По unsure rate (↓)": "unsure_rate",
         }
         sort_by = st.selectbox("Сортировать", list(sort_options.keys()))
         ascending = "↑" in sort_by
@@ -594,53 +554,33 @@ if not intent_stats.empty:
             "times_in_topk": "В topK",
             "yes_count": "Yes",
             "no_count": "No",
-            "unsure_count": "Unsure",
             "total_votes": "Всего голосов",
             "avg_probability": "Ср. вероятность",
             "avg_rank": "Ср. ранг",
-            "precision": "Precision",
-            "unsure_rate": "Unsure Rate"
+            "precision": "Precision"
         }).style.format({
             "Ср. вероятность": "{:.3f}",
             "Ср. ранг": "{:.1f}",
-            "Precision": "{:.2%}",
-            "Unsure Rate": "{:.2%}"
+            "Precision": "{:.2%}"
         }, na_rep="-"),
         use_container_width=True
     )
 
     # Worst performing intents
     st.subheader("Проблемные интенты")
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("**Низкий Precision (часто ошибается)**")
-        low_precision = intent_stats[intent_stats["total_votes"] >= 3].nsmallest(10, "precision")
-        if not low_precision.empty:
-            st.dataframe(
-                low_precision[["label", "precision", "total_votes", "yes_count", "no_count"]].rename(columns={
-                    "label": "Интент",
-                    "precision": "Precision",
-                    "total_votes": "Голосов",
-                    "yes_count": "Yes",
-                    "no_count": "No"
-                }).style.format({"Precision": "{:.2%}"}, na_rep="-"),
-                use_container_width=True
-            )
-
-    with col2:
-        st.markdown("**Высокий Unsure Rate (сложные для разметки)**")
-        high_unsure = intent_stats[intent_stats["total_votes"] >= 3].nlargest(10, "unsure_rate")
-        if not high_unsure.empty:
-            st.dataframe(
-                high_unsure[["label", "unsure_rate", "total_votes", "unsure_count"]].rename(columns={
-                    "label": "Интент",
-                    "unsure_rate": "Unsure Rate",
-                    "total_votes": "Голосов",
-                    "unsure_count": "Unsure"
-                }).style.format({"Unsure Rate": "{:.2%}"}, na_rep="-"),
-                use_container_width=True
-            )
+    st.markdown("**Низкий Precision (часто ошибается)**")
+    low_precision = intent_stats[intent_stats["total_votes"] >= 3].nsmallest(10, "precision")
+    if not low_precision.empty:
+        st.dataframe(
+            low_precision[["label", "precision", "total_votes", "yes_count", "no_count"]].rename(columns={
+                "label": "Интент",
+                "precision": "Precision",
+                "total_votes": "Голосов",
+                "yes_count": "Yes",
+                "no_count": "No"
+            }).style.format({"Precision": "{:.2%}"}, na_rep="-"),
+            use_container_width=True
+        )
 
 # Extra Labels (outside topK)
 st.header("Дополнительные метки (вне topK)")
