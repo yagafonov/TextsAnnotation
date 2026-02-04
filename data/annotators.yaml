@@ -3,43 +3,43 @@ annotators:
     languge: kz
     password: jfkasn2
     cluster: 
-      - 'card_products_rus'
-      - 'credits_rus'
-      - 'general_rus'
-      - 'mobile_app_support_rus'
-      - 'money_transfers_rus'
-      - 'restrictions_rus'
-      - 'social_rus'
+      - card_products_rus
+      - credits_rus
+      - general_rus
+      - mobile_app_support_rus
+      - money_transfers_rus
+      - restrictions_rus
+      - social_rus
   - name: madina
     languge: kz
     password: knvws1
     cluster: 
-      - 'card_products_rus'
-      - 'credits_rus'
-      - 'general_rus'
-      - 'mobile_app_support_rus'
-      - 'money_transfers_rus'
-      - 'restrictions_rus'
-      - 'social_rus'
+      - card_products_rus
+      - credits_rus
+      - general_rus
+      - mobile_app_support_rus
+      - money_transfers_rus
+      - restrictions_rus
+      - social_rus
   - name: roma
     languge: ru
     password: vnbhb4
     cluster: 
-      - 'card_products_rus'
-      - 'credits_rus'
-      - 'general_rus'
-      - 'mobile_app_support_rus'
-      - 'money_transfers_rus'
-      - 'restrictions_rus'
-      - 'social_rus'
+      - card_products_rus
+      - credits_rus
+      - general_rus
+      - mobile_app_support_rus
+      - money_transfers_rus
+      - restrictions_rus
+      - social_rus
   - name: iskander
     languge: ru
     password: mokensvjb1
     cluster: 
-      - 'card_products_rus'
-      - 'credits_rus'
-      - 'general_rus'
-      - 'mobile_app_support_rus'
-      - 'money_transfers_rus'
-      - 'restrictions_rus'
-      - 'social_rus'
+      - card_products_rus
+      - credits_rus
+      - general_rus
+      - mobile_app_support_rus
+      - money_transfers_rus
+      - restrictions_rus
+      - social_rus
