@@ -1,7 +1,41 @@
 annotators:
-  - name: annotator_1
-    password: demo123
-    cluster: general_intents
-  - name: annotator_2
-    password: demo123
-    cluster: general_intents2
+  - name: adina
+    password: jfkasn2
+    cluster: 
+      - 'card_products_rus'
+      - 'credits_rus'
+      - 'general_rus'
+      - 'mobile_app_support_rus'
+      - 'money_transfers_rus'
+      - 'restrictions_rus'
+      - 'social_rus'
+  - name: madina
+    password: knvws1
+    cluster: 
+      - 'card_products_rus'
+      - 'credits_rus'
+      - 'general_rus'
+      - 'mobile_app_support_rus'
+      - 'money_transfers_rus'
+      - 'restrictions_rus'
+      - 'social_rus'
+  - name: roma
+    password: vnbhb4
+    cluster: 
+      - 'card_products_rus'
+      - 'credits_rus'
+      - 'general_rus'
+      - 'mobile_app_support_rus'
+      - 'money_transfers_rus'
+      - 'restrictions_rus'
+      - 'social_rus'
+  - name: iskander
+    password: mokensvjb1
+    cluster: 
+      - 'card_products_rus'
+      - 'credits_rus'
+      - 'general_rus'
+      - 'mobile_app_support_rus'
+      - 'money_transfers_rus'
+      - 'restrictions_rus'
+      - 'social_rus'
