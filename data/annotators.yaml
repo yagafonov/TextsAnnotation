@@ -1,5 +1,6 @@
 annotators:
   - name: adina
+    languge: kz
     password: jfkasn2
     cluster: 
       - 'card_products_rus'
@@ -10,6 +11,7 @@ annotators:
       - 'restrictions_rus'
       - 'social_rus'
   - name: madina
+    languge: kz
     password: knvws1
     cluster: 
       - 'card_products_rus'
@@ -20,6 +22,7 @@ annotators:
       - 'restrictions_rus'
       - 'social_rus'
   - name: roma
+    languge: ru
     password: vnbhb4
     cluster: 
       - 'card_products_rus'
@@ -30,6 +33,7 @@ annotators:
       - 'restrictions_rus'
       - 'social_rus'
   - name: iskander
+    languge: ru
     password: mokensvjb1
     cluster: 
       - 'card_products_rus'
