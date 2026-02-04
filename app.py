@@ -3,6 +3,10 @@ import os
 from datetime import datetime
 from typing import Dict, List, Tuple
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import streamlit as st
 import yaml
 
@@ -306,6 +310,54 @@ with st.sidebar:
     if annotators and not password_ok:
         st.warning("Введите корректный пароль для выбранного разметчика.")
 
+    # Progress counter for annotator
+    if password_ok and annotator:
+        with connect() as conn:
+            # Get total texts available for this annotator's clusters/language
+            total_query_parts = ["SELECT COUNT(*) as cnt FROM texts t WHERE 1=1"]
+            total_params = []
+            if annotator_cluster:
+                total_query_parts.append("AND t.assigned_cluster = ?")
+                total_params.append(annotator_cluster)
+            elif annotator_clusters:
+                placeholders = ", ".join("?" for _ in annotator_clusters)
+                total_query_parts.append(f"AND t.assigned_cluster IN ({placeholders})")
+                total_params.extend(annotator_clusters)
+            if annotator_language:
+                total_query_parts.append("AND (t.language = ? OR t.language IS NULL)")
+                total_params.append(annotator_language)
+
+            total_texts = conn.execute(" ".join(total_query_parts), total_params).fetchone()["cnt"]
+
+            # Get texts annotated by this annotator
+            done_query_parts = [
+                """
+                SELECT COUNT(DISTINCT t.id) as cnt
+                FROM texts t
+                INNER JOIN annotations a ON a.text_id = t.id AND a.annotator = ?
+                WHERE 1=1
+                """
+            ]
+            done_params = [annotator]
+            if annotator_cluster:
+                done_query_parts.append("AND t.assigned_cluster = ?")
+                done_params.append(annotator_cluster)
+            elif annotator_clusters:
+                placeholders = ", ".join("?" for _ in annotator_clusters)
+                done_query_parts.append(f"AND t.assigned_cluster IN ({placeholders})")
+                done_params.extend(annotator_clusters)
+            if annotator_language:
+                done_query_parts.append("AND (t.language = ? OR t.language IS NULL)")
+                done_params.append(annotator_language)
+
+            done_texts = conn.execute(" ".join(done_query_parts), done_params).fetchone()["cnt"]
+
+        st.divider()
+        st.subheader("Прогресс")
+        progress_pct = done_texts / total_texts if total_texts > 0 else 0
+        st.progress(progress_pct)
+        st.metric("Размечено", f"{done_texts} / {total_texts}", delta=f"{progress_pct:.1%}")
+
 st.subheader("Список текстов")
 if annotators and not password_ok:
     st.stop()
@@ -482,23 +534,23 @@ with col1:
             else:
                 st.write("Нет примеров.")
 
-with col2:
-    st.markdown("### Метаданные")
-    for row in candidates_rows:
-        label = row["label"]
-        label_info = intents.get(label, {})
-        st.write(
-            f"**{label}** | rank={row['rank']} | p={row['probability']:.2f} | "
-            f"сложность={label_info.get('complexity', '-')}, кластер={label_info.get('cluster', '-') }"
-        )
+# Group all intents by cluster for selection
+all_clusters = sorted(set(payload.get("cluster", "unknown") for payload in intents.values()))
+available_extra_intents = [label for label in intents.keys() if label not in candidate_labels]
 
-if annotator_cluster:
-    all_intents = [label for label, payload in intents.items() if payload.get("cluster") == annotator_cluster]
-else:
-    all_intents = list(intents.keys())
+# Create options with cluster prefix for better navigation
+extra_options = []
+for cluster in all_clusters:
+    cluster_intents = [
+        label for label in available_extra_intents
+        if intents.get(label, {}).get("cluster") == cluster
+    ]
+    extra_options.extend(cluster_intents)
+
 extra_labels = st.multiselect(
-    "Дополнительные метки вне topK",
-    [label for label in all_intents if label not in candidate_labels],
+    "Дополнительные метки вне topK (все кластеры)",
+    extra_options,
+    format_func=lambda x: f"[{intents.get(x, {}).get('cluster', 'unknown')}] {x}",
 )
 
 col_save, col_skip = st.columns([1, 1])
@@ -532,51 +584,3 @@ with col_skip:
             st.toast("Текст пропущен. Загружается следующий...")
             st.rerun()
 
-st.markdown("### Статистика")
-with connect() as conn:
-    candidates_rows = conn.execute(
-        """
-        SELECT text_id, label, rank, probability
-        FROM candidates
-        ORDER BY text_id, rank
-        """
-    ).fetchall()
-    annotations_rows = conn.execute(
-        """
-        SELECT text_id, annotator, label, decision
-        FROM annotations
-        WHERE decision = 'yes'
-        """
-    ).fetchall()
-
-if candidates_rows and annotations_rows:
-    candidates_by_text = {}
-    for row in candidates_rows:
-        candidates_by_text.setdefault(row["text_id"], []).append(
-            Candidate(label=row["label"], rank=row["rank"], probability=row["probability"])
-        )
-
-    metrics_by_text = {}
-    for row in annotations_rows:
-        key = (row["text_id"], row["annotator"])
-        metrics_by_text.setdefault(key, {"candidates": candidates_by_text.get(row["text_id"], []), "targets": []})
-        metrics_by_text[key]["targets"].append(row["label"])
-
-    totals = {"top1_hit_rate": 0, "topK_coverage": 0, "margin_error_rate": 0, "outside_topK_rate": 0}
-    count = 0
-    for entry in metrics_by_text.values():
-        metrics = compute_metrics(entry["targets"], entry["candidates"], MARGIN_THRESHOLD)
-        for key in totals:
-            totals[key] += 1 if metrics[key] else 0
-        count += 1
-
-    if count:
-        st.write({key: round(value / count, 3) for key, value in totals.items()})
-else:
-    st.info("Недостаточно данных для расчета метрик.")
-
-st.markdown("### История разметок")
-if existing_annotations:
-    st.dataframe(existing_annotations, use_container_width=True)
-else:
-    st.info("Для этого текста еще нет разметок.")
