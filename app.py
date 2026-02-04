@@ -73,9 +73,19 @@ def normalize_clusters(annotator: dict) -> List[str]:
     if isinstance(clusters, list):
         return [str(item).strip() for item in clusters if str(item).strip()]
     cluster = annotator.get("cluster")
+    if isinstance(cluster, list):
+        return [str(item).strip() for item in cluster if str(item).strip()]
     if cluster:
         return [str(cluster).strip()]
     return []
+
+
+def get_annotator_language(annotator: dict) -> str | None:
+    """Get annotator's language (handles typo 'languge' in config)."""
+    lang = annotator.get("language") or annotator.get("languge")
+    if lang:
+        return str(lang).strip().lower()
+    return None
 
 
 def normalize_scores(scores: Dict[str, float]) -> Dict[str, float]:
@@ -91,16 +101,17 @@ def select_top_k(scores: Dict[str, float], top_k: int) -> List[Candidate]:
     return [Candidate(label=label, rank=idx + 1, probability=score) for idx, (label, score) in enumerate(ranked)]
 
 
-def determine_cluster(candidates: List[Candidate], intents: Dict[str, dict]) -> str:
-    cluster_counts: Dict[str, float] = {}
-    for candidate in candidates:
-        cluster = intents.get(candidate.label, {}).get("cluster")
+def determine_cluster(scores: Dict[str, float], intents: Dict[str, dict]) -> str:
+    """Determine cluster by summing scores for all intents belonging to each cluster."""
+    cluster_scores: Dict[str, float] = {}
+    for label, score in scores.items():
+        cluster = intents.get(label, {}).get("cluster")
         if not cluster:
             continue
-        cluster_counts[cluster] = cluster_counts.get(cluster, 0.0) + candidate.probability
-    if not cluster_counts:
+        cluster_scores[cluster] = cluster_scores.get(cluster, 0.0) + score
+    if not cluster_scores:
         return "unknown"
-    return max(cluster_counts.items(), key=lambda item: item[1])[0]
+    return max(cluster_scores.items(), key=lambda item: item[1])[0]
 
 
 def import_texts_from_csv(
@@ -119,9 +130,11 @@ def import_texts_from_csv(
             request_text = (row.get("request_text") or "").strip()
             if not request_text:
                 continue
+            # Read language column if present (kz or ru)
+            language = (row.get("language") or "").strip().lower() or None
             raw_scores: Dict[str, float] = {}
             for key, value in row.items():
-                if key == "request_text" or value is None:
+                if key in ("request_text", "language") or value is None:
                     continue
                 if key not in intents:
                     continue
@@ -133,7 +146,7 @@ def import_texts_from_csv(
             candidates = select_top_k(scores, top_k)
             if not candidates:
                 continue
-            assigned_cluster = determine_cluster(candidates, intents)
+            assigned_cluster = determine_cluster(scores, intents)
             with connect() as conn:
                 existing = conn.execute("SELECT id FROM texts WHERE text = ?", (request_text,)).fetchone()
                 if existing:
@@ -145,7 +158,7 @@ def import_texts_from_csv(
                     INSERT INTO texts (text, language, clusters, assigned_cluster, data_version, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (request_text, None, None, assigned_cluster, data_version, datetime.utcnow().isoformat()),
+                    (request_text, language, None, assigned_cluster, data_version, datetime.utcnow().isoformat()),
                 )
                 text_id = cursor.lastrowid
                 for candidate in candidates:
@@ -283,9 +296,12 @@ with st.sidebar:
     password = st.text_input("Пароль", type="password")
     selected_annotator = next((item for item in annotators if item.get("name") == annotator), {})
     annotator_clusters = normalize_clusters(selected_annotator)
+    annotator_language = get_annotator_language(selected_annotator)
     annotator_cluster = None
     if annotator_clusters:
         annotator_cluster = st.selectbox("Активный кластер", annotator_clusters)
+    if annotator_language:
+        st.info(f"Язык: {annotator_language.upper()}")
     password_ok = bool(selected_annotator) and password == selected_annotator.get("password")
     if annotators and not password_ok:
         st.warning("Введите корректный пароль для выбранного разметчика.")
@@ -320,10 +336,20 @@ with connect() as conn:
         filters.append("NOT EXISTS (SELECT 1 FROM annotations a2 WHERE a2.text_id = t.id AND a2.annotator = ?)")
         params.append(annotator)
         if annotator_cluster:
+            # Filter by selected cluster
             filters.append("t.assigned_cluster = ?")
             params.append(annotator_cluster)
+        elif annotator_clusters:
+            # Filter by all annotator's allowed clusters
+            placeholders = ", ".join("?" for _ in annotator_clusters)
+            filters.append(f"t.assigned_cluster IN ({placeholders})")
+            params.extend(annotator_clusters)
+        # Filter by annotator's language
+        if annotator_language:
+            filters.append("(t.language = ? OR t.language IS NULL)")
+            params.append(annotator_language)
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY t.created_at DESC"
+        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY t.assigned_cluster, t.created_at DESC"
         texts = conn.execute(query, params + [MIN_ANNOTATORS]).fetchall()
     else:
         # Normal mode - show unannotated and unskipped texts
@@ -348,10 +374,20 @@ with connect() as conn:
             filters.append("NOT EXISTS (SELECT 1 FROM skipped_texts s WHERE s.text_id = t.id AND s.annotator = ?)")
             params.append(annotator)
         if annotator_cluster:
+            # Filter by selected cluster
             filters.append("t.assigned_cluster = ?")
             params.append(annotator_cluster)
+        elif annotator_clusters:
+            # Filter by all annotator's allowed clusters
+            placeholders = ", ".join("?" for _ in annotator_clusters)
+            filters.append(f"t.assigned_cluster IN ({placeholders})")
+            params.extend(annotator_clusters)
+        # Filter by annotator's language
+        if annotator_language:
+            filters.append("(t.language = ? OR t.language IS NULL)")
+            params.append(annotator_language)
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY t.created_at DESC"
+        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY t.assigned_cluster, t.created_at DESC"
         texts = conn.execute(query, params + [MIN_ANNOTATORS]).fetchall()
 
 if not texts:
@@ -361,15 +397,25 @@ if not texts:
         st.info("Нет текстов для разметки.")
     st.stop()
 
+# Group texts by cluster for display
+cluster_counts: Dict[str, int] = {}
+for row in texts:
+    cluster = row["assigned_cluster"] or "unknown"
+    cluster_counts[cluster] = cluster_counts.get(cluster, 0) + 1
+
+# Show cluster summary
+if not annotator_cluster and len(cluster_counts) > 1:
+    st.caption("Тексты по кластерам: " + " | ".join(f"{c}: {n}" for c, n in sorted(cluster_counts.items())))
+
 if show_skipped:
     text_options = {
-        f"#{row['id']} [{row['assigned_cluster'] or 'unknown'}] ({row['annotators']} разметчика) [ПРОПУЩЕН]": row["id"]
+        f"[{row['assigned_cluster'] or 'unknown'}] #{row['id']} ({row['annotators']} разметчика) [ПРОПУЩЕН]": row["id"]
         for row in texts
     }
     st.caption(f"Пропущенных текстов: {len(texts)}")
 else:
     text_options = {
-        f"#{row['id']} [{row['assigned_cluster'] or 'unknown'}] ({row['annotators']} разметчика)": row["id"]
+        f"[{row['assigned_cluster'] or 'unknown'}] #{row['id']} ({row['annotators']} разметчика)": row["id"]
         for row in texts
     }
 selected_label = st.selectbox("Выберите текст для разметки", list(text_options.keys()))

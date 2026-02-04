@@ -6,7 +6,7 @@ import streamlit as st
 
 from db import connect, create_data_version, create_model_version
 
-ADMIN_PASSWORD = os.environ.get("TEXTS_ADMIN_PASSWORD", "admin123")
+ADMIN_PASSWORD = os.environ.get("TEXTS_ADMIN_PASSWORD", "123admin123")
 MIN_ANNOTATORS = int(os.environ.get("TEXTS_MIN_ANNOTATORS", "2"))
 
 st.set_page_config(page_title="Admin Dashboard", layout="wide")
