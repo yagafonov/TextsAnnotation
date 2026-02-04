@@ -159,6 +159,25 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS shown_intents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text_id INTEGER NOT NULL,
+                annotator TEXT NOT NULL,
+                label TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(text_id) REFERENCES texts(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS shown_intents_unique_entry
+            ON shown_intents (text_id, annotator, label)
+            """
+        )
         conn.commit()
         ensure_column(conn, "texts", "assigned_cluster", "TEXT")
 

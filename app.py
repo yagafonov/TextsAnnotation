@@ -251,8 +251,11 @@ def save_annotations(
     decisions: Dict[str, str],
     candidate_labels: List[str],
     extra_labels: List[str],
+    shown_intents_source: Dict[str, str],
 ) -> None:
     with connect() as conn:
+        now = datetime.utcnow().isoformat()
+        # Save annotations for all shown intents
         for label, decision in decisions.items():
             conn.execute(
                 """
@@ -265,9 +268,10 @@ def save_annotations(
                     label,
                     decision,
                     1 if label in candidate_labels else 0,
-                    datetime.utcnow().isoformat(),
+                    now,
                 ),
             )
+        # Save extra labels (intents outside union, selected by annotator)
         for label in extra_labels:
             conn.execute(
                 """
@@ -280,8 +284,26 @@ def save_annotations(
                     label,
                     "yes",
                     0,
-                    datetime.utcnow().isoformat(),
+                    now,
                 ),
+            )
+        # Save shown_intents for this annotator (union + extra)
+        for label, source in shown_intents_source.items():
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO shown_intents (text_id, annotator, label, source, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (text_id, annotator, label, source, now),
+            )
+        # Save extra labels as shown_intents with source "extra"
+        for label in extra_labels:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO shown_intents (text_id, annotator, label, source, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (text_id, annotator, label, "extra", now),
             )
         conn.commit()
 
@@ -564,15 +586,34 @@ with connect() as conn:
         (selected_text_id,),
     ).fetchall()
 
+# Build candidate lookup for probability/rank info
+candidate_lookup = {row["label"]: row for row in candidates_rows}
+candidate_labels = [row["label"] for row in candidates_rows]
+
+# Build union of TopK candidates + all intents from annotator's cluster
 if annotator_cluster:
-    candidates_rows = [
-        row
-        for row in candidates_rows
-        if intents.get(row["label"], {}).get("cluster") == annotator_cluster
+    cluster_intent_labels = [
+        label for label, payload in intents.items()
+        if payload.get("cluster") == annotator_cluster
     ]
-    if not candidates_rows:
-        st.info("Для выбранного кластера нет кандидатов. Выберите другой кластер.")
-        st.stop()
+else:
+    cluster_intent_labels = []
+
+# Union: TopK candidates + cluster intents (deduplicated, preserving order)
+shown_intent_labels = list(candidate_labels)  # Start with TopK
+for label in cluster_intent_labels:
+    if label not in shown_intent_labels:
+        shown_intent_labels.append(label)
+
+# Track source for each shown intent
+shown_intents_source: Dict[str, str] = {}
+for label in shown_intent_labels:
+    if label in candidate_labels and label in cluster_intent_labels:
+        shown_intents_source[label] = "topk_and_cluster"
+    elif label in candidate_labels:
+        shown_intents_source[label] = "topk"
+    else:
+        shown_intents_source[label] = "cluster"
 
 st.markdown("### Текст")
 st.write(text_row["text"])
@@ -588,16 +629,14 @@ st.caption(
     )
 )
 
-candidate_labels = [row["label"] for row in candidates_rows]
-
-st.markdown("### Кандидаты (topK)")
+st.markdown("### Интенты для разметки (TopK + кластер)")
 
 decisions: Dict[str, str] = {}
-for row in candidates_rows:
-    label = row["label"]
+for label in shown_intent_labels:
     label_info = intents.get(label, {})
+    candidate_row = candidate_lookup.get(label)
 
-    # Create a container for each candidate
+    # Create a container for each intent
     with st.container():
         col_check, col_info = st.columns([1, 3])
 
@@ -608,8 +647,12 @@ for row in candidates_rows:
                 key=f"decision_{selected_text_id}_{label}",
             )
             decisions[label] = "yes" if is_yes else "no"
-            # Show rank and probability
-            st.caption(f"rank={row['rank']} | p={row['probability']:.2f}")
+            # Show source and probability/rank if available
+            source = shown_intents_source[label]
+            if candidate_row:
+                st.caption(f"[{source}] rank={candidate_row['rank']} | p={candidate_row['probability']:.2f}")
+            else:
+                st.caption(f"[{source}]")
 
         with col_info:
             # Description always visible
@@ -624,11 +667,11 @@ for row in candidates_rows:
 
         st.divider()
 
-# Group all intents by cluster for selection
-all_clusters = sorted(set(payload.get("cluster", "unknown") for payload in intents.values()))
-available_extra_intents = [label for label in intents.keys() if label not in candidate_labels]
+# Extra intents: all intents NOT in the shown union (from other clusters)
+available_extra_intents = [label for label in intents.keys() if label not in shown_intent_labels]
 
-# Create options with cluster prefix for better navigation
+# Group by cluster for better navigation
+all_clusters = sorted(set(payload.get("cluster", "unknown") for payload in intents.values()))
 extra_options = []
 for cluster in all_clusters:
     cluster_intents = [
@@ -638,7 +681,7 @@ for cluster in all_clusters:
     extra_options.extend(cluster_intents)
 
 extra_labels = st.multiselect(
-    "Дополнительные метки вне topK (все кластеры)",
+    "Дополнительные метки вне объединения (другие кластеры)",
     extra_options,
     format_func=lambda x: f"[{intents.get(x, {}).get('cluster', 'unknown')}] {x}",
 )
@@ -649,7 +692,7 @@ with col_save:
         if not annotator:
             st.error("Укажите имя разметчика в боковой панели.")
         else:
-            save_annotations(selected_text_id, annotator, decisions, candidate_labels, extra_labels)
+            save_annotations(selected_text_id, annotator, decisions, candidate_labels, extra_labels, shown_intents_source)
             # Remove from skipped if it was there
             with connect() as conn:
                 conn.execute(
