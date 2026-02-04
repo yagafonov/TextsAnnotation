@@ -290,28 +290,108 @@ st.set_page_config(page_title="Texts Annotation", layout="wide")
 
 intents, model, annotators = init_services()
 
+# Build annotator lookup for validation
+annotator_lookup = {item.get("name"): item for item in annotators if item.get("name")}
+
+# Initialize session state from URL query params (persists across refresh)
+query_params = st.query_params
+url_user = query_params.get("user")
+url_cluster = query_params.get("cluster")
+
+# Restore session from URL if valid user
+if url_user and url_user in annotator_lookup:
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = True
+        st.session_state.annotator_name = url_user
+        st.session_state.annotator_cluster = url_cluster
+else:
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+    if "annotator_name" not in st.session_state:
+        st.session_state.annotator_name = None
+    if "annotator_cluster" not in st.session_state:
+        st.session_state.annotator_cluster = None
+
 st.title("Платформа разметки текстов")
 
 with st.sidebar:
     st.header("Вход разметчика")
-    annotator_names = [item.get("name") for item in annotators]
-    annotator_names = [name for name in annotator_names if name]
-    annotator = st.selectbox("Разметчик", annotator_names) if annotator_names else st.text_input("Имя разметчика")
-    password = st.text_input("Пароль", type="password")
-    selected_annotator = next((item for item in annotators if item.get("name") == annotator), {})
-    annotator_clusters = normalize_clusters(selected_annotator)
-    annotator_language = get_annotator_language(selected_annotator)
-    annotator_cluster = None
-    if annotator_clusters:
-        annotator_cluster = st.selectbox("Активный кластер", annotator_clusters)
-    if annotator_language:
-        st.info(f"Язык: {annotator_language.upper()}")
-    password_ok = bool(selected_annotator) and password == selected_annotator.get("password")
-    if annotators and not password_ok:
-        st.warning("Введите корректный пароль для выбранного разметчика.")
 
-    # Progress counter for annotator
-    if password_ok and annotator:
+    # If already logged in, show status and logout button
+    if st.session_state.logged_in and st.session_state.annotator_name:
+        st.success(f"Вы вошли как: **{st.session_state.annotator_name}**")
+
+        # Get annotator info
+        selected_annotator = annotator_lookup.get(st.session_state.annotator_name, {})
+        annotator_clusters = normalize_clusters(selected_annotator)
+        annotator_language = get_annotator_language(selected_annotator)
+
+        # Cluster selector (persisted in session state and URL)
+        annotator_cluster = None
+        if annotator_clusters:
+            # Use stored cluster or default to first
+            default_idx = 0
+            if st.session_state.annotator_cluster in annotator_clusters:
+                default_idx = annotator_clusters.index(st.session_state.annotator_cluster)
+            annotator_cluster = st.selectbox(
+                "Активный кластер",
+                annotator_clusters,
+                index=default_idx,
+                key="cluster_selector"
+            )
+            st.session_state.annotator_cluster = annotator_cluster
+            # Update URL with cluster
+            st.query_params["cluster"] = annotator_cluster
+
+        if annotator_language:
+            st.info(f"Язык: {annotator_language.upper()}")
+
+        # Use session state values
+        annotator = st.session_state.annotator_name
+        password_ok = True
+
+        # Logout button
+        if st.button("Выйти", type="secondary"):
+            st.session_state.logged_in = False
+            st.session_state.annotator_name = None
+            st.session_state.annotator_cluster = None
+            # Clear URL params
+            st.query_params.clear()
+            st.rerun()
+
+    else:
+        # Login form
+        annotator_names = list(annotator_lookup.keys())
+
+        annotator_input = st.selectbox(
+            "Разметчик", annotator_names, key="login_annotator"
+        ) if annotator_names else st.text_input("Имя разметчика", key="login_annotator_text")
+
+        password_input = st.text_input("Пароль", type="password", key="login_password")
+
+        selected_annotator = annotator_lookup.get(annotator_input, {})
+
+        # Login button
+        if st.button("Войти", type="primary"):
+            if selected_annotator and password_input == selected_annotator.get("password"):
+                st.session_state.logged_in = True
+                st.session_state.annotator_name = annotator_input
+                # Save to URL for persistence across refresh
+                st.query_params["user"] = annotator_input
+                st.toast(f"Добро пожаловать, {annotator_input}!")
+                st.rerun()
+            else:
+                st.error("Неверный пароль.")
+
+        # Not logged in yet
+        annotator = None
+        password_ok = False
+        annotator_clusters = []
+        annotator_language = None
+        annotator_cluster = None
+
+    # Progress counter for annotator (only if logged in)
+    if st.session_state.logged_in and st.session_state.annotator_name:
         with connect() as conn:
             # Get total texts available for this annotator's clusters/language
             total_query_parts = ["SELECT COUNT(*) as cnt FROM texts t WHERE 1=1"]
@@ -512,27 +592,37 @@ candidate_labels = [row["label"] for row in candidates_rows]
 
 st.markdown("### Кандидаты (topK)")
 
-col1, col2 = st.columns([2, 1])
-with col1:
-    decisions: Dict[str, str] = {}
-    for row in candidates_rows:
-        label = row["label"]
-        label_info = intents.get(label, {})
-        is_yes = st.checkbox(
-            f"{label}",
-            value=False,
-            key=f"decision_{selected_text_id}_{label}",
-        )
-        decisions[label] = "yes" if is_yes else "no"
-        with st.expander("Описание интента"):
-            st.write(label_info.get("description", "Нет описания."))
+decisions: Dict[str, str] = {}
+for row in candidates_rows:
+    label = row["label"]
+    label_info = intents.get(label, {})
+
+    # Create a container for each candidate
+    with st.container():
+        col_check, col_info = st.columns([1, 3])
+
+        with col_check:
+            is_yes = st.checkbox(
+                f"{label}",
+                value=False,
+                key=f"decision_{selected_text_id}_{label}",
+            )
+            decisions[label] = "yes" if is_yes else "no"
+            # Show rank and probability
+            st.caption(f"rank={row['rank']} | p={row['probability']:.2f}")
+
+        with col_info:
+            # Description always visible
+            description = label_info.get("description", "Нет описания.")
+            st.markdown(f"**Описание:** {description}")
+
+            # Examples always visible
             examples = label_info.get("train", [])[:5]
             if examples:
-                st.write("Примеры:")
-                for example in examples:
-                    st.write(f"- {example}")
-            else:
-                st.write("Нет примеров.")
+                examples_text = " | ".join(examples)
+                st.caption(f"Примеры: {examples_text}")
+
+        st.divider()
 
 # Group all intents by cluster for selection
 all_clusters = sorted(set(payload.get("cluster", "unknown") for payload in intents.values()))
