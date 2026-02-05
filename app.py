@@ -1,6 +1,6 @@
 import csv
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -163,7 +163,7 @@ def import_texts_from_csv(
                     INSERT INTO texts (text, language, clusters, assigned_cluster, data_version, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (request_text, language, None, assigned_cluster, data_version, datetime.utcnow().isoformat()),
+                    (request_text, language, None, assigned_cluster, data_version, datetime.now(UTC).isoformat()),
                 )
                 text_id = cursor.lastrowid
                 for candidate in candidates:
@@ -178,7 +178,7 @@ def import_texts_from_csv(
                             candidate.rank,
                             candidate.probability,
                             model_version,
-                            datetime.utcnow().isoformat(),
+                            datetime.now(UTC).isoformat(),
                         ),
                     )
                 conn.commit()
@@ -224,7 +224,7 @@ def add_text(
             INSERT INTO texts (text, language, clusters, assigned_cluster, data_version, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (text, language, clusters, assigned_cluster, data_version, datetime.utcnow().isoformat()),
+            (text, language, clusters, assigned_cluster, data_version, datetime.now(UTC).isoformat()),
         )
         text_id = cursor.lastrowid
         for candidate in candidates:
@@ -239,7 +239,7 @@ def add_text(
                     candidate.rank,
                     candidate.probability,
                     model_version,
-                    datetime.utcnow().isoformat(),
+                    datetime.now(UTC).isoformat(),
                 ),
             )
         conn.commit()
@@ -255,7 +255,7 @@ def save_annotations(
     shown_intents_source: Dict[str, str],
 ) -> None:
     with connect() as conn:
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).isoformat()
         # Save annotations for all shown intents
         for label, decision in decisions.items():
             conn.execute(
