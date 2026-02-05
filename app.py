@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
 import streamlit as st
+import streamlit.components.v1 as components
 import yaml
 
 from db import (
@@ -310,6 +311,14 @@ def save_annotations(
 
 
 st.set_page_config(page_title="Texts Annotation", layout="wide")
+
+# Scroll to top after save/skip
+if st.session_state.get("scroll_to_top"):
+    st.session_state.scroll_to_top = False
+    components.html(
+        "<script>window.parent.document.querySelector('section.main').scrollTo(0, 0);</script>",
+        height=0,
+    )
 
 intents, model, annotators = init_services()
 
@@ -702,6 +711,7 @@ with col_save:
                 )
                 conn.commit()
             st.toast("Разметка сохранена. Загружается следующий текст...")
+            st.session_state.scroll_to_top = True
             st.rerun()
 
 with col_skip:
@@ -716,5 +726,6 @@ with col_skip:
                 )
                 conn.commit()
             st.toast("Текст пропущен. Загружается следующий...")
+            st.session_state.scroll_to_top = True
             st.rerun()
 
