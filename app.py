@@ -582,8 +582,29 @@ else:
         f"[{row['assigned_cluster'] or 'unknown'}] #{row['id']} ({row['annotators']} разметчика)": row["id"]
         for row in texts
     }
-selected_label = st.selectbox("Выберите текст для разметки", list(text_options.keys()))
+text_labels = list(text_options.keys())
+text_ids = list(text_options.values())
+if "selected_text_id" not in st.session_state or st.session_state.selected_text_id not in text_ids:
+    st.session_state.selected_text_id = text_ids[0]
+default_index = text_ids.index(st.session_state.selected_text_id)
+selected_label = st.selectbox("Выберите текст для разметки", text_labels, index=default_index)
 selected_text_id = text_options[selected_label]
+if selected_text_id != st.session_state.selected_text_id:
+    st.session_state.selected_text_id = selected_text_id
+
+
+def set_next_skipped_text_id() -> None:
+    if not show_skipped:
+        return
+    if selected_text_id not in text_ids:
+        return
+    current_index = text_ids.index(selected_text_id)
+    next_id = None
+    if current_index + 1 < len(text_ids):
+        next_id = text_ids[current_index + 1]
+    elif current_index > 0:
+        next_id = text_ids[current_index - 1]
+    st.session_state.selected_text_id = next_id
 
 with connect() as conn:
     text_row = conn.execute("SELECT * FROM texts WHERE id = ?", (selected_text_id,)).fetchone()
@@ -711,6 +732,7 @@ with col_save:
                     (selected_text_id, annotator),
                 )
                 conn.commit()
+            set_next_skipped_text_id()
             st.toast("Разметка сохранена. Загружается следующий текст...")
             st.session_state.scroll_to_top = True
             st.rerun()
@@ -726,6 +748,7 @@ with col_skip:
                     (selected_text_id, annotator, datetime.now().isoformat()),
                 )
                 conn.commit()
+            set_next_skipped_text_id()
             st.toast("Текст пропущен. Загружается следующий...")
             st.session_state.scroll_to_top = True
             st.rerun()
