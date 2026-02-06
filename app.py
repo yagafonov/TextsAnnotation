@@ -694,6 +694,7 @@ extra_labels = st.multiselect(
     "Дополнительные метки вне объединения (другие кластеры)",
     extra_options,
     format_func=lambda x: f"[{intents.get(x, {}).get('cluster', 'unknown')}] {x}",
+    key=f"extra_labels_{selected_text_id}",
 )
 
 col_save, col_skip = st.columns([1, 1])
@@ -728,4 +729,3 @@ with col_skip:
             st.toast("Текст пропущен. Загружается следующий...")
             st.session_state.scroll_to_top = True
             st.rerun()
-
