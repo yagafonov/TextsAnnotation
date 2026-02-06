@@ -330,19 +330,12 @@ query_params = st.query_params
 url_user = query_params.get("user")
 url_cluster = query_params.get("cluster")
 
-# Restore session from URL if valid user
-if url_user and url_user in annotator_lookup:
-    if "logged_in" not in st.session_state:
-        st.session_state.logged_in = True
-        st.session_state.annotator_name = url_user
-        st.session_state.annotator_cluster = url_cluster
-else:
-    if "logged_in" not in st.session_state:
-        st.session_state.logged_in = False
-    if "annotator_name" not in st.session_state:
-        st.session_state.annotator_name = None
-    if "annotator_cluster" not in st.session_state:
-        st.session_state.annotator_cluster = None
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "annotator_name" not in st.session_state:
+    st.session_state.annotator_name = None
+if "annotator_cluster" not in st.session_state:
+    st.session_state.annotator_cluster = None
 
 st.title("Платформа разметки текстов")
 
@@ -363,6 +356,8 @@ with st.sidebar:
         if annotator_clusters:
             # Use stored cluster or default to first
             default_idx = 0
+            if url_cluster in annotator_clusters and st.session_state.annotator_cluster is None:
+                st.session_state.annotator_cluster = url_cluster
             if st.session_state.annotator_cluster in annotator_clusters:
                 default_idx = annotator_clusters.index(st.session_state.annotator_cluster)
             annotator_cluster = st.selectbox(
@@ -394,6 +389,10 @@ with st.sidebar:
     else:
         # Login form
         annotator_names = list(annotator_lookup.keys())
+        if url_user and url_user in annotator_lookup:
+            st.session_state.setdefault("login_annotator", url_user)
+        elif url_user:
+            st.session_state.setdefault("login_annotator_text", url_user)
 
         annotator_input = st.selectbox(
             "Разметчик", annotator_names, key="login_annotator"
@@ -408,8 +407,6 @@ with st.sidebar:
             if selected_annotator and password_input == selected_annotator.get("password"):
                 st.session_state.logged_in = True
                 st.session_state.annotator_name = annotator_input
-                # Save to URL for persistence across refresh
-                st.query_params["user"] = annotator_input
                 st.toast(f"Добро пожаловать, {annotator_input}!")
                 st.rerun()
             else:
@@ -571,19 +568,48 @@ for row in texts:
 if not annotator_cluster and len(cluster_counts) > 1:
     st.caption("Тексты по кластерам: " + " | ".join(f"{c}: {n}" for c, n in sorted(cluster_counts.items())))
 
+text_items = []
+for index, row in enumerate(texts, start=1):
+    suffix = " [ПРОПУЩЕН]" if show_skipped else ""
+    label = (
+        f"{index}/{len(texts)} "
+        f"[{row['assigned_cluster'] or 'unknown'}] "
+        f"#{row['id']} ({row['annotators']} разметчика){suffix}"
+    )
+    text_items.append((label, row["id"]))
+
 if show_skipped:
-    text_options = {
-        f"[{row['assigned_cluster'] or 'unknown'}] #{row['id']} ({row['annotators']} разметчика) [ПРОПУЩЕН]": row["id"]
-        for row in texts
-    }
     st.caption(f"Пропущенных текстов: {len(texts)}")
-else:
-    text_options = {
-        f"[{row['assigned_cluster'] or 'unknown'}] #{row['id']} ({row['annotators']} разметчика)": row["id"]
-        for row in texts
-    }
-selected_label = st.selectbox("Выберите текст для разметки", list(text_options.keys()))
-selected_text_id = text_options[selected_label]
+
+text_labels = [label for label, _ in text_items]
+text_ids = [text_id for _, text_id in text_items]
+default_index = 0
+if "selected_text_id" in st.session_state and st.session_state.selected_text_id in text_ids:
+    default_index = text_ids.index(st.session_state.selected_text_id)
+elif "selected_text_index" in st.session_state:
+    default_index = min(st.session_state.selected_text_index, len(text_labels) - 1)
+
+selected_label = st.selectbox("Выберите текст для разметки", text_labels, index=default_index)
+selected_text_id = text_ids[text_labels.index(selected_label)]
+if selected_text_id != st.session_state.get("selected_text_id"):
+    st.session_state.selected_text_id = selected_text_id
+    st.session_state.selected_text_index = text_ids.index(selected_text_id)
+
+
+def set_next_text_selection_after_removal() -> None:
+    if selected_text_id not in text_ids:
+        return
+    current_index = text_ids.index(selected_text_id)
+    next_id = None
+    if current_index + 1 < len(text_ids):
+        next_id = text_ids[current_index + 1]
+    elif current_index > 0:
+        next_id = text_ids[current_index - 1]
+    st.session_state.selected_text_id = next_id
+    if len(text_ids) > 1:
+        st.session_state.selected_text_index = min(current_index, len(text_ids) - 2)
+    else:
+        st.session_state.selected_text_index = 0
 
 with connect() as conn:
     text_row = conn.execute("SELECT * FROM texts WHERE id = ?", (selected_text_id,)).fetchone()
@@ -694,6 +720,7 @@ extra_labels = st.multiselect(
     "Дополнительные метки вне объединения (другие кластеры)",
     extra_options,
     format_func=lambda x: f"[{intents.get(x, {}).get('cluster', 'unknown')}] {x}",
+    key=f"extra_labels_{selected_text_id}",
 )
 
 col_save, col_skip = st.columns([1, 1])
@@ -710,6 +737,7 @@ with col_save:
                     (selected_text_id, annotator),
                 )
                 conn.commit()
+            set_next_text_selection_after_removal()
             st.toast("Разметка сохранена. Загружается следующий текст...")
             st.session_state.scroll_to_top = True
             st.rerun()
@@ -725,7 +753,7 @@ with col_skip:
                     (selected_text_id, annotator, datetime.now().isoformat()),
                 )
                 conn.commit()
+            set_next_text_selection_after_removal()
             st.toast("Текст пропущен. Загружается следующий...")
             st.session_state.scroll_to_top = True
             st.rerun()
-
