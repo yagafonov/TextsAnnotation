@@ -330,19 +330,12 @@ query_params = st.query_params
 url_user = query_params.get("user")
 url_cluster = query_params.get("cluster")
 
-# Restore session from URL if valid user
-if url_user and url_user in annotator_lookup:
-    if "logged_in" not in st.session_state:
-        st.session_state.logged_in = True
-        st.session_state.annotator_name = url_user
-        st.session_state.annotator_cluster = url_cluster
-else:
-    if "logged_in" not in st.session_state:
-        st.session_state.logged_in = False
-    if "annotator_name" not in st.session_state:
-        st.session_state.annotator_name = None
-    if "annotator_cluster" not in st.session_state:
-        st.session_state.annotator_cluster = None
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "annotator_name" not in st.session_state:
+    st.session_state.annotator_name = None
+if "annotator_cluster" not in st.session_state:
+    st.session_state.annotator_cluster = None
 
 st.title("Платформа разметки текстов")
 
@@ -363,6 +356,8 @@ with st.sidebar:
         if annotator_clusters:
             # Use stored cluster or default to first
             default_idx = 0
+            if url_cluster in annotator_clusters and st.session_state.annotator_cluster is None:
+                st.session_state.annotator_cluster = url_cluster
             if st.session_state.annotator_cluster in annotator_clusters:
                 default_idx = annotator_clusters.index(st.session_state.annotator_cluster)
             annotator_cluster = st.selectbox(
@@ -394,6 +389,10 @@ with st.sidebar:
     else:
         # Login form
         annotator_names = list(annotator_lookup.keys())
+        if url_user and url_user in annotator_lookup:
+            st.session_state.setdefault("login_annotator", url_user)
+        elif url_user:
+            st.session_state.setdefault("login_annotator_text", url_user)
 
         annotator_input = st.selectbox(
             "Разметчик", annotator_names, key="login_annotator"
@@ -408,8 +407,6 @@ with st.sidebar:
             if selected_annotator and password_input == selected_annotator.get("password"):
                 st.session_state.logged_in = True
                 st.session_state.annotator_name = annotator_input
-                # Save to URL for persistence across refresh
-                st.query_params["user"] = annotator_input
                 st.toast(f"Добро пожаловать, {annotator_input}!")
                 st.rerun()
             else:
