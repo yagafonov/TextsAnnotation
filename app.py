@@ -29,6 +29,7 @@ INTENTS_PATH = os.environ.get("TEXTS_INTENTS_PATH", "data/intents")
 ANNOTATORS_PATH = os.environ.get("TEXTS_ANNOTATORS_PATH", "data/annotators.yaml")
 IMPORT_CSV_PATH = os.environ.get("TEXTS_IMPORT_CSV_PATH", "data/requests.csv")
 MARGIN_THRESHOLD = float(os.environ.get("TEXTS_MARGIN_THRESHOLD", "0.1"))
+PROBABILITY_THRESHOLD = float(os.environ.get("TEXTS_PROBABILITY_THRESHOLD", "0.1"))
 MIN_ANNOTATORS = int(os.environ.get("TEXTS_MIN_ANNOTATORS", "2"))
 
 
@@ -600,30 +601,14 @@ with connect() as conn:
 candidate_lookup = {row["label"]: row for row in candidates_rows}
 candidate_labels = [row["label"] for row in candidates_rows]
 
-# Build union of TopK candidates + all intents from annotator's cluster
-if annotator_cluster:
-    cluster_intent_labels = [
-        label for label, payload in intents.items()
-        if payload.get("cluster") == annotator_cluster
-    ]
-else:
-    cluster_intent_labels = []
+# Show only TopK candidates with probability >= threshold
+shown_intent_labels = [
+    label for label in candidate_labels
+    if candidate_lookup[label]["probability"] >= PROBABILITY_THRESHOLD
+]
 
-# Union: TopK candidates + cluster intents (deduplicated, preserving order)
-shown_intent_labels = list(candidate_labels)  # Start with TopK
-for label in cluster_intent_labels:
-    if label not in shown_intent_labels:
-        shown_intent_labels.append(label)
-
-# Track source for each shown intent
-shown_intents_source: Dict[str, str] = {}
-for label in shown_intent_labels:
-    if label in candidate_labels and label in cluster_intent_labels:
-        shown_intents_source[label] = "topk_and_cluster"
-    elif label in candidate_labels:
-        shown_intents_source[label] = "topk"
-    else:
-        shown_intents_source[label] = "cluster"
+# Track source for each shown intent (all are topk now)
+shown_intents_source: Dict[str, str] = {label: "topk" for label in shown_intent_labels}
 
 st.markdown("### Текст")
 st.write(text_row["text"])
@@ -639,7 +624,7 @@ st.caption(
     )
 )
 
-st.markdown("### Интенты для разметки (TopK + кластер)")
+st.markdown("### Интенты для разметки (TopK)")
 
 decisions: Dict[str, str] = {}
 for label in shown_intent_labels:
