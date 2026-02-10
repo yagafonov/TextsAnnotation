@@ -511,7 +511,7 @@ with connect() as conn:
             filters.append("(t.language = ? OR t.language IS NULL)")
             params.append(annotator_language)
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY t.assigned_cluster, t.created_at DESC"
+        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY COUNT(DISTINCT a.annotator) DESC, t.assigned_cluster, t.created_at DESC"
         texts = conn.execute(query, params + [MIN_ANNOTATORS]).fetchall()
     else:
         # Normal mode - show unannotated and unskipped texts
@@ -549,7 +549,7 @@ with connect() as conn:
             filters.append("(t.language = ? OR t.language IS NULL)")
             params.append(annotator_language)
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY t.assigned_cluster, t.created_at DESC"
+        query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY COUNT(DISTINCT a.annotator) DESC, t.assigned_cluster, t.created_at DESC"
         texts = conn.execute(query, params + [MIN_ANNOTATORS]).fetchall()
 
 if not texts:
