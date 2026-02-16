@@ -12,3 +12,6 @@ pydantic-settings==2.1.0
 
 # Data processing (likely already used by streamlit)
 pandas>=2.0.0
+
+# Session Management
+extra-streamlit-components==0.1.71

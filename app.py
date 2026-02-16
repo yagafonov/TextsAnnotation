@@ -5,9 +5,11 @@ Uses the new modular architecture with services and repositories.
 """
 
 import os
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import extra_streamlit_components as stx
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
@@ -34,6 +36,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Initialize cookie manager
+cookie_manager = stx.CookieManager()
 
 
 @st.cache_resource
@@ -96,6 +101,15 @@ def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
     if "authenticated_user" not in st.session_state:
         st.session_state.authenticated_user = None
     
+    # Check cookie if not authenticated
+    if not st.session_state.authenticated_user:
+        cookie_user = cookie_manager.get("annotator_user")
+        if cookie_user:
+            user = auth_service.get_annotator(cookie_user)
+            if user:
+                st.session_state.authenticated_user = user
+                logger.info(f"Restored session for user: {user.name}")
+    
     if st.session_state.authenticated_user:
         return st.session_state.authenticated_user
     
@@ -124,6 +138,8 @@ def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
                 annotator = auth_service.authenticate(username, password)
                 if annotator:
                     st.session_state.authenticated_user = annotator
+                    # Set cookie for 30 days
+                    cookie_manager.set("annotator_user", annotator.name, expires_at=datetime.now() + timedelta(days=30))
                     st.success(f"✅ Добро пожаловать, {annotator.name}!")
                     st.rerun()
                 else:
@@ -157,6 +173,7 @@ def show_annotation_interface(
         
         if st.button("🚪 Выйти"):
             st.session_state.authenticated_user = None
+            cookie_manager.delete("annotator_user")
             st.rerun()
         
         st.divider()

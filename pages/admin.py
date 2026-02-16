@@ -1,9 +1,10 @@
 """Admin Dashboard - Refactored to use StatsService."""
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
+import extra_streamlit_components as stx
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
@@ -22,12 +23,27 @@ ADMIN_PASSWORD = os.environ.get("TEXTS_ADMIN_PASSWORD", "admin123")
 
 st.set_page_config(page_title="Admin Dashboard", layout="wide", page_icon="📊")
 
+# Initialize cookie manager (must be unique key if multiple on same page, but here it's separate page)
+# However, stx.CookieManager key defaults to "init".
+cookie_manager = stx.CookieManager(key="admin_cookies")
+
 
 def authenticate_admin():
     """Admin authentication with session management."""
     # Initialize session state
     if "admin_authenticated" not in st.session_state:
         st.session_state.admin_authenticated = False
+        
+    # Check cookie if not authenticated
+    if not st.session_state.admin_authenticated:
+        # Simple check: if cookie exists and matches password
+        # Ideally we should store a hash, but for now we store the password hash or just a specific token
+        # For simplicity in this demo, we'll store a simple token "admin_session_valid"
+        # SECURITY WARNING: This is a weak implementation for demo purposes.
+        # In production, use proper session management.
+        admin_token = cookie_manager.get("admin_token")
+        if admin_token == "valid_admin_session":
+            st.session_state.admin_authenticated = True
     
     # Show logout button if authenticated
     if st.session_state.admin_authenticated:
@@ -35,6 +51,7 @@ def authenticate_admin():
             st.success("✅ Администратор авторизован")
             if st.button("🚪 Выйти", use_container_width=True):
                 st.session_state.admin_authenticated = False
+                cookie_manager.delete("admin_token")
                 st.rerun()
         return
     
@@ -47,6 +64,8 @@ def authenticate_admin():
             if st.session_state.admin_password_input == ADMIN_PASSWORD:
                 st.session_state.admin_authenticated = True
                 st.session_state.admin_auth_error = None
+                # Set cookie
+                cookie_manager.set("admin_token", "valid_admin_session", expires_at=datetime.now() + timedelta(days=30))
             else:
                 st.session_state.admin_auth_error = "❌ Неверный пароль"
 
@@ -299,13 +318,13 @@ def show_import_section():
             df = pd.read_csv(upload_path)
             
             # Validate required columns
-            required_columns = ["text"]
+            required_columns = ["request_text"]
             optional_columns = ["language", "clusters"]
             missing_required = [col for col in required_columns if col not in df.columns]
             
             if missing_required:
                 st.error(f"❌ Отсутствуют обязательные колонки: {', '.join(missing_required)}")
-                st.info("Требуемые колонки: text")
+                st.info("Требуемые колонки: request_text")
                 st.info("Опциональные колонки: language, clusters, score_<intent_name>")
                 return
             
@@ -317,7 +336,7 @@ def show_import_section():
                 st.metric("Всего строк", len(df))
             
             with col2:
-                non_empty = df["text"].notna().sum()
+                non_empty = df["request_text"].notna().sum()
                 st.metric("Непустых текстов", non_empty)
             
             # Show detected columns
@@ -410,7 +429,7 @@ def show_import_section():
         with st.expander("📖 Требования к формату файла"):
             st.markdown("""
             **Обязательные колонки:**
-            - `text` - текст для импорта
+            - `request_text` - текст для импорта
             
             **Опциональные колонки:**
             - `language` - язык текста (например: ru, en)
@@ -419,7 +438,7 @@ def show_import_section():
             
             **Пример CSV:**
             ```
-            text,language,clusters,score_greeting,score_question
+            request_text,language,clusters,score_greeting,score_question
             "Привет, как дела?",ru,"general,greetings",0.9,0.1
             "Что это?",ru,"general,questions",0.1,0.8
             ```
