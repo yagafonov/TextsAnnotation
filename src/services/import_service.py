@@ -1,0 +1,125 @@
+"""Import service for CSV data import."""
+
+import csv
+import os
+from typing import Dict
+
+from src.ml.model_stub import TopKModelStub
+from src.models.intent import Intent
+from src.repositories.text_repo import TextRepository
+from src.utils.logger import logger
+
+
+class ImportService:
+    """Service for importing data from CSV files."""
+    
+    def __init__(self, db_path: str):
+        """Initialize import service.
+        
+        Args:
+            db_path: Path to database
+        """
+        self.text_repo = TextRepository(db_path)
+    
+    def import_from_csv(
+        self,
+        csv_path: str,
+        intents: Dict[str, Intent],
+        top_k: int,
+        model_version: int,
+        data_version: int
+    ) -> int:
+        """Import texts from CSV file with model predictions.
+        
+        Args:
+            csv_path: Path to CSV file
+            intents: Dictionary of available intents
+            top_k: Number of top candidates to generate
+            model_version: Current model version
+            data_version: Current data version
+            
+        Returns:
+            Number of texts imported
+        """
+        if not os.path.exists(csv_path):
+            logger.warning(f"CSV file not found: {csv_path}")
+            return 0
+        
+        imported_count = 0
+        model = TopKModelStub(intents, top_k=top_k)
+        
+        try:
+            with open(csv_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                
+                for row in reader:
+                    text = row.get("text", "").strip()
+                    if not text or self.text_repo.exists(text):
+                        continue
+                    
+                    language = row.get("language")
+                    clusters = row.get("clusters")
+                    
+                    # Determine assigned cluster from scores or clusters field
+                    assigned_cluster = self._determine_cluster(row, intents)
+                    
+                    # Generate candidates
+                    candidates = model.predict(text)
+                    
+                    # Create text with candidates
+                    self.text_repo.create(
+                        text=text,
+                        language=language,
+                        clusters=clusters,
+                        assigned_cluster=assigned_cluster,
+                        data_version=data_version,
+                        candidates=candidates,
+                        model_version=model_version
+                    )
+                    
+                    imported_count += 1
+            
+            logger.info(f"Imported {imported_count} texts from {csv_path}")
+            return imported_count
+            
+        except Exception as e:
+            logger.error(f"Failed to import from CSV: {e}")
+            raise
+    
+    def _determine_cluster(self, row: Dict[str, str], intents: Dict[str, Intent]) -> str:
+        """Determine cluster from CSV row.
+        
+        Args:
+            row: CSV row
+            intents: Available intents
+            
+        Returns:
+            Cluster name
+        """
+        # Try to get from explicit clusters field
+        clusters = row.get("clusters", "").strip()
+        if clusters:
+            return clusters.split(",")[0].strip()
+        
+        # Try to determine from scores
+        scores = {}
+        for key, value in row.items():
+            if key.startswith("score_"):
+                intent_label = key.replace("score_", "")
+                try:
+                    scores[intent_label] = float(value)
+                except (ValueError, TypeError):
+                    continue
+        
+        if scores:
+            # Sum scores by cluster
+            cluster_scores: Dict[str, float] = {}
+            for label, score in scores.items():
+                intent = intents.get(label)
+                if intent and intent.cluster:
+                    cluster_scores[intent.cluster] = cluster_scores.get(intent.cluster, 0) + score
+            
+            if cluster_scores:
+                return max(cluster_scores.items(), key=lambda x: x[1])[0]
+        
+        return "unknown"

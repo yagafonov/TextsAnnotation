@@ -1,6 +1,6 @@
 annotators:
   - name: adina
-    languge: Казахский
+    language: Казахский
     password: jfkasn2
     cluster: 
       - card_products_rus
@@ -11,7 +11,7 @@ annotators:
       - restrictions_rus
       - social_rus
   - name: madina
-    languge: Казахский
+    language: Казахский
     password: knvws1
     cluster: 
       - card_products_rus
@@ -22,7 +22,7 @@ annotators:
       - restrictions_rus
       - social_rus
   - name: roma
-    languge: Русский
+    language: Русский
     password: vnbhb4
     cluster: 
       - card_products_rus
@@ -33,7 +33,7 @@ annotators:
       - restrictions_rus
       - social_rus
   - name: iskander
-    languge: Русский
+    language: Русский
     password: mokensvjb1
     cluster: 
       - card_products_rus
