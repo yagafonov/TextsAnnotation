@@ -42,14 +42,29 @@ def authenticate_admin():
     with st.sidebar:
         st.header("🔐 Авторизация")
         
-        admin_password = st.text_input("Пароль администратора", type="password")
-        if st.button("Войти", use_container_width=True):
-            if admin_password == ADMIN_PASSWORD:
+        # Callback for authentication
+        def try_authenticate():
+            if st.session_state.admin_password_input == ADMIN_PASSWORD:
                 st.session_state.admin_authenticated = True
-                st.success("✅ Вход выполнен")
-                st.rerun()
+                st.session_state.admin_auth_error = None
             else:
-                st.error("❌ Неверный пароль")
+                st.session_state.admin_auth_error = "❌ Неверный пароль"
+
+        st.text_input(
+            "Пароль администратора", 
+            type="password",
+            key="admin_password_input",
+            on_change=try_authenticate
+        )
+        
+        if st.session_state.get("admin_auth_error"):
+            st.error(st.session_state.admin_auth_error)
+            st.session_state.admin_auth_error = None
+
+        if st.button("Войти", use_container_width=True):
+            try_authenticate()
+            if st.session_state.admin_authenticated:
+                st.rerun()
     
     # Show instruction in main area
     st.info("👈 Войдите, используя пароль администратора")
