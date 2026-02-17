@@ -22900,3 +22900,74 @@
 2026-02-17 05:13:35,526 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for iskander
 2026-02-17 05:13:35,527 - texts_annotation - INFO - auth_service.py:56 - Loaded 4 annotators
 2026-02-17 05:13:35,530 - texts_annotation - INFO - auth_service.py:74 - Annotator authenticated: roma
+2026-02-17 06:30:14,051 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/annotators.yaml
+2026-02-17 06:30:14,051 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for adina
+2026-02-17 06:30:14,051 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for madina
+2026-02-17 06:30:14,051 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for roma
+2026-02-17 06:30:14,051 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for iskander
+2026-02-17 06:30:14,052 - texts_annotation - INFO - auth_service.py:56 - Loaded 4 annotators
+2026-02-17 16:45:32,482 - texts_annotation - ERROR - database.py:92 - Failed to dump database: [Errno 24] Too many open files: 'data/dumps/backup.sql'
+2026-02-17 16:46:32,496 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:47:32,501 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:48:32,512 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:49:32,515 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:50:32,518 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:51:32,525 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:52:32,536 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:53:32,543 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:54:32,551 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:55:32,557 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:56:32,567 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:57:32,575 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:58:32,579 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 16:59:32,589 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:00:32,600 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:01:32,604 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:02:32,613 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:03:32,625 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:04:32,635 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:05:32,646 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:06:32,651 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:07:32,657 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:08:32,664 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:09:32,672 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:10:32,678 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:11:32,688 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:12:32,697 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:13:32,704 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:14:32,715 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:15:32,726 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:16:32,732 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:17:32,736 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:18:32,745 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:19:32,755 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:20:32,766 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:21:32,776 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:22:32,779 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:23:32,785 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:24:32,795 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:25:32,804 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:26:32,813 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:27:32,823 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:28:32,823 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:29:32,825 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:30:32,828 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:31:32,833 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:32:32,839 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:33:32,844 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:34:32,851 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:35:32,855 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:36:32,860 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:37:32,866 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:38:32,870 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:39:32,876 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:40:32,878 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:41:32,880 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:42:32,886 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:43:32,893 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:44:32,895 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:45:32,902 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:46:32,905 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:47:32,911 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:48:32,917 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:49:32,923 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file

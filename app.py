@@ -176,6 +176,21 @@ def show_annotation_interface(
     intents: Dict[str, Intent]
 ):
     """Main annotation interface."""
+    # Initialize scroll state
+    if "scroll_to_top" not in st.session_state:
+        st.session_state.scroll_to_top = False
+        
+    # Scroll to top if flag is set
+    if st.session_state.scroll_to_top:
+        js = """
+        <script>
+            var body = window.parent.document.querySelector(".main");
+            if (body) body.scrollTop = 0;
+        </script>
+        """
+        components.html(js, height=0)
+        st.session_state.scroll_to_top = False
+
     st.title("📝 Разметка текстов")
     
     # Sidebar
@@ -301,11 +316,6 @@ def show_annotation_interface(
         # The main loop pushed in order. The only out-of-order item could be this one.
         # But users might expect ID order.
         # Let's re-sort filtered_texts and rebuild map?
-        # Only if strict ID ordering is needed. For now appending is fine (it might appear at end if excluded).
-        # To affect selectbox nicely, maybe strict order is better.
-        # Optimization: Just loop again? No.
-        # Let's sort filtered_texts by ID.
-        # But we need to sync text_to_original_index.
         # This is getting complex.
         # Simpler: Modify the MAIN loop to ALWAYS include current_real_id.
         pass
@@ -373,12 +383,15 @@ def show_annotation_interface(
     )
     
     # Update global index based on selection
+    # Need to handle case where selection triggers rerun
+    # But scroll should only happen on Save/Skip
+    
     selected_filtered_index = nav_options.index(selected_nav)
     original_index = text_to_original_index[selected_filtered_index]
     
     if original_index != st.session_state.current_text_index:
         st.session_state.current_text_index = original_index
-        st.rerun()
+        # st.rerun() # Removed as per instruction
 
     # Get current text
     current_text = all_texts[st.session_state.current_text_index]
@@ -549,9 +562,10 @@ def show_annotation_interface(
             )
             st.success("Сохранено!")
             
-            # Jump to next pending text
+            # Jump to next pending text and SCROLL TOP
             next_idx = find_next_pending_index(st.session_state.current_text_index, all_texts)
             st.session_state.current_text_index = next_idx
+            st.session_state.scroll_to_top = True
             st.rerun()
     
     with col2:
@@ -559,9 +573,10 @@ def show_annotation_interface(
             annotation_service.skip_text(text_id, annotator.name)
             st.info("Текст пропущен")
             
-            # Jump to next pending text (same logic as save)
+            # Jump to next pending text and SCROLL TOP
             next_idx = find_next_pending_index(st.session_state.current_text_index, all_texts)
             st.session_state.current_text_index = next_idx
+            st.session_state.scroll_to_top = True
             st.rerun()
     
     with col3:
