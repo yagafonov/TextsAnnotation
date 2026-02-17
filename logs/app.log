@@ -22971,3 +22971,50 @@
 2026-02-17 17:47:32,911 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
 2026-02-17 17:48:32,917 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
 2026-02-17 17:49:32,923 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:50:32,928 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:51:32,932 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:52:32,935 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:53:32,940 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:54:32,946 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:55:32,953 - texts_annotation - ERROR - database.py:92 - Failed to dump database: unable to open database file
+2026-02-17 17:55:42,274 - texts_annotation - INFO - database.py:57 - Database already exists: data/db/app.db
+2026-02-17 17:55:42,275 - texts_annotation - INFO - database.py:133 - Initializing database: data/db/app.db
+2026-02-17 17:55:42,277 - texts_annotation - INFO - database.py:238 - Creating performance indexes
+2026-02-17 17:55:42,278 - texts_annotation - INFO - database.py:262 - Database initialized successfully
+2026-02-17 17:55:42,278 - texts_annotation - INFO - database.py:112 - Auto-dump started (interval: 60s)
+2026-02-17 17:55:42,278 - texts_annotation - INFO - database.py:118 - Auto-dump thread started
+2026-02-17 17:55:42,278 - texts_annotation - INFO - intent_repo.py:29 - Loading intents from directory: data/intents
+2026-02-17 17:55:42,322 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/intents/card_products_rus.yaml
+2026-02-17 17:55:42,394 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/intents/credits_rus.yaml
+2026-02-17 17:55:42,436 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/intents/general_rus.yaml
+2026-02-17 17:55:42,453 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/intents/mobile_app_support_rus.yaml
+2026-02-17 17:55:42,469 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/intents/money_transfers_rus.yaml
+2026-02-17 17:55:42,506 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/intents/restrictions_rus.yaml
+2026-02-17 17:55:42,529 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/intents/social_rus.yaml
+2026-02-17 17:55:42,529 - texts_annotation - INFO - intent_repo.py:68 - Loaded 120 intents
+2026-02-17 17:55:42,581 - texts_annotation - INFO - app.py:59 - Application initialized with 120 intents
+2026-02-17 17:55:42,609 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/annotators.yaml
+2026-02-17 17:55:42,610 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for adina
+2026-02-17 17:55:42,610 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for madina
+2026-02-17 17:55:42,610 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for roma
+2026-02-17 17:55:42,610 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for iskander
+2026-02-17 17:55:42,610 - texts_annotation - INFO - auth_service.py:56 - Loaded 4 annotators
+2026-02-17 17:56:25,265 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/annotators.yaml
+2026-02-17 17:56:25,266 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for adina
+2026-02-17 17:56:25,267 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for madina
+2026-02-17 17:56:25,267 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for roma
+2026-02-17 17:56:25,267 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for iskander
+2026-02-17 17:56:25,268 - texts_annotation - INFO - auth_service.py:56 - Loaded 4 annotators
+2026-02-17 17:56:25,273 - texts_annotation - INFO - auth_service.py:74 - Annotator authenticated: roma
+2026-02-17 17:56:27,215 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/annotators.yaml
+2026-02-17 17:56:27,215 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for adina
+2026-02-17 17:56:27,215 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for madina
+2026-02-17 17:56:27,215 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for roma
+2026-02-17 17:56:27,216 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for iskander
+2026-02-17 17:56:27,216 - texts_annotation - INFO - auth_service.py:56 - Loaded 4 annotators
+2026-02-17 17:56:27,428 - texts_annotation - INFO - yaml_loader.py:23 - Loaded YAML file: data/annotators.yaml
+2026-02-17 17:56:27,429 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for adina
+2026-02-17 17:56:27,429 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Казахский' to 'kk' for madina
+2026-02-17 17:56:27,429 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for roma
+2026-02-17 17:56:27,429 - texts_annotation - INFO - auth_service.py:49 - Mapped language 'Русский' to 'ru' for iskander
+2026-02-17 17:56:27,429 - texts_annotation - INFO - auth_service.py:56 - Loaded 4 annotators

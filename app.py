@@ -37,8 +37,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize cookie manager
-cookie_manager = stx.CookieManager()
+@st.cache_resource(experimental_allow_widgets=True)
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_cookie_manager()
 
 
 @st.cache_resource
