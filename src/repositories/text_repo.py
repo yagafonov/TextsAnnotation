@@ -78,14 +78,27 @@ class TextRepository(BaseRepository):
             Text if found, None otherwise
         """
         with get_connection(self.db_path) as conn:
-            row = conn.execute("SELECT * FROM texts WHERE id = ?", (text_id,)).fetchone()
+            row = conn.execute(
+                """
+                SELECT 
+                    id, 
+                    text as request_text, 
+                    language, 
+                    clusters, 
+                    assigned_cluster, 
+                    data_version, 
+                    created_at 
+                FROM texts WHERE id = ?
+                """, 
+                (text_id,)
+            ).fetchone()
             
             if not row:
                 return None
             
             return Text(
                 id=row["id"],
-                text=row["text"],
+                text=row["request_text"],
                 language=row["language"],
                 clusters=row["clusters"],
                 assigned_cluster=row["assigned_cluster"],
@@ -155,7 +168,7 @@ class TextRepository(BaseRepository):
                 base_query = """
                     SELECT
                         t.id,
-                        t.text,
+                        t.text as request_text,
                         t.language,
                         t.clusters,
                         t.assigned_cluster,
@@ -175,7 +188,7 @@ class TextRepository(BaseRepository):
                 base_query = """
                     SELECT
                         t.id,
-                        t.text,
+                        t.text as request_text,
                         t.language,
                         t.clusters,
                         t.assigned_cluster,
@@ -208,3 +221,53 @@ class TextRepository(BaseRepository):
             query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY COUNT(DISTINCT a.annotator) DESC, t.assigned_cluster, t.created_at DESC"
             
             return conn.execute(query, params + [min_annotators]).fetchall()
+
+    def get_all_texts_for_annotator(
+        self,
+        annotator: str,
+        clusters: Optional[List[str]] = None,
+        language: Optional[str] = None
+    ) -> List[dict]:
+        """Get all texts with status for an annotator.
+        
+        Args:
+            annotator: Annotator name
+            clusters: Filter by clusters
+            language: Filter by language
+            
+        Returns:
+            List of dicts with id, request_text, is_annotated
+        """
+        with get_connection(self.db_path) as conn:
+            base_query = """
+                SELECT
+                    t.id,
+                    t.text as request_text,
+                    CASE 
+                        WHEN EXISTS (SELECT 1 FROM annotations a WHERE a.text_id = t.id AND a.annotator = ?) THEN 1
+                        ELSE 0
+                    END as is_annotated,
+                    CASE 
+                        WHEN EXISTS (SELECT 1 FROM skipped_texts s WHERE s.text_id = t.id AND s.annotator = ?) THEN 1
+                        ELSE 0
+                    END as is_skipped
+                FROM texts t
+            """
+            params = [annotator, annotator]
+            filters = []
+            
+            # Add cluster filter
+            if clusters:
+                placeholders = ", ".join("?" for _ in clusters)
+                filters.append(f"t.assigned_cluster IN ({placeholders})")
+                params.extend(clusters)
+            
+            # Add language filter
+            if language:
+                filters.append("(t.language = ? OR t.language IS NULL)")
+                params.append(language)
+            
+            where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+            query = f"{base_query} {where_clause} ORDER BY t.id ASC"
+            
+            return conn.execute(query, params).fetchall()

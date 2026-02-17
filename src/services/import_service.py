@@ -4,7 +4,7 @@ import csv
 import os
 from typing import Dict
 
-from src.ml.model_stub import TopKModelStub
+from modeling import TopKModelStub
 from src.models.intent import Intent
 from src.repositories.text_repo import TextRepository
 from src.utils.logger import logger
@@ -53,18 +53,24 @@ class ImportService:
                 reader = csv.DictReader(f)
                 
                 for row in reader:
-                    text = row.get("text", "").strip()
+                    text = row.get("request_text", "").strip()
                     if not text or self.text_repo.exists(text):
                         continue
                     
-                    language = row.get("language")
+                    language = self._normalize_language(row.get("language"))
                     clusters = row.get("clusters")
+                    
+                    # Generate candidates first
+                    candidates = model.predict(text)
                     
                     # Determine assigned cluster from scores or clusters field
                     assigned_cluster = self._determine_cluster(row, intents)
                     
-                    # Generate candidates
-                    candidates = model.predict(text)
+                    # Fallback: if unknown, use top candidate's cluster
+                    if assigned_cluster == "unknown" and candidates:
+                        top_candidate_label = candidates[0].label
+                        if top_candidate_label in intents:
+                            assigned_cluster = intents[top_candidate_label].cluster
                     
                     # Create text with candidates
                     self.text_repo.create(
@@ -123,3 +129,27 @@ class ImportService:
                 return max(cluster_scores.items(), key=lambda x: x[1])[0]
         
         return "unknown"
+
+    def _normalize_language(self, lang: str) -> str:
+        """Normalize language code.
+        
+        Args:
+            lang: Language string
+            
+        Returns:
+            Normalized language code (ru/kk) or original
+        """
+        if not lang:
+            return None
+            
+        lang = lang.strip()
+        mapping = {
+            "Русский": "ru",
+            "russian": "ru",
+            "ru": "ru",
+            "Казахский": "kk",
+            "kazakh": "kk",
+            "kz": "kk",
+            "kk": "kk"
+        }
+        return mapping.get(lang, lang)

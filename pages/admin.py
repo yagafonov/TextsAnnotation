@@ -221,7 +221,7 @@ def show_disagreements(stats_service: StatsService):
             df,
             column_config={
                 "text_id": "ID текста",
-                "text": st.column_config.TextColumn("Текст", width="large"),
+                "request_text": st.column_config.TextColumn("Текст", width="large"),
                 "label": "Интент",
                 "annotator_count": "Аннотаторов",
                 "yes_count": "Да",
@@ -456,8 +456,8 @@ def main():
     # Initialize service
     stats_service = StatsService(settings.db_path)
     
-    # Tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    # Navigation
+    tabs = [
         "📊 Обзор",
         "👥 Аннотаторы",
         "🎯 Качество",
@@ -465,27 +465,49 @@ def main():
         "⚠️ Разногласия",
         "💾 Экспорт",
         "📥 Импорт"
-    ])
+    ]
     
-    with tab1:
+    # Initialize session state for tab if not exists
+    if "admin_active_tab" not in st.session_state:
+        st.session_state.admin_active_tab = "📊 Обзор"
+
+    # Use pills or radio for navigation (pills are nicer in 1.54)
+    # But for compatibility let's use radio horizontal if pills not available, 
+    # or just use radio. 
+    # Streamlit 1.40+ has st.pills. We are on 1.54.
+    selected_tab = st.pills(
+        "Навигация",
+        options=tabs,
+        key="admin_active_tab",
+        label_visibility="collapsed"
+    )
+    
+    # If pills returns None (e.g. at start), default to first
+    if not selected_tab:
+        selected_tab = tabs[0]
+        st.session_state.admin_active_tab = selected_tab
+
+    st.divider()
+
+    if selected_tab == "📊 Обзор":
         show_overall_stats(stats_service)
     
-    with tab2:
+    elif selected_tab == "👥 Аннотаторы":
         show_annotator_stats(stats_service)
     
-    with tab3:
+    elif selected_tab == "🎯 Качество":
         show_intent_quality(stats_service)
     
-    with tab4:
+    elif selected_tab == "📈 Кластеры":
         show_cluster_progress(stats_service)
     
-    with tab5:
+    elif selected_tab == "⚠️ Разногласия":
         show_disagreements(stats_service)
     
-    with tab6:
+    elif selected_tab == "💾 Экспорт":
         show_export_section(stats_service)
     
-    with tab7:
+    elif selected_tab == "📥 Импорт":
         show_import_section()
 
 

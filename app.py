@@ -71,6 +71,25 @@ def get_services():
     }
 
 
+def to_bold(text: str) -> str:
+    """Convert text to unicode bold sans-serif."""
+    # Mathematical Bold Sans-Serif
+    # A-Z: 1D5D4-1D5ED
+    # a-z: 1D5EE-1D607
+    # 0-9: 1D7EC-1D7F5
+    result = ""
+    for char in text:
+        if "A" <= char <= "Z":
+            result += chr(ord(char) - ord("A") + 0x1D5D4)
+        elif "a" <= char <= "z":
+            result += chr(ord(char) - ord("a") + 0x1D5EE)
+        elif "0" <= char <= "9":
+            result += chr(ord(char) - ord("0") + 0x1D7EC)
+        else:
+            result += char
+    return result
+
+
 def handle_import(services: dict, intents: Dict[str, Intent]):
     """Handle CSV import."""
     import_service: ImportService = services["import"]
@@ -196,22 +215,219 @@ def show_annotation_interface(
         # Show skipped toggle
         show_skipped = st.checkbox("🔄 Показать пропущенные", value=False)
     
-    # Get next text
-    text_row = annotation_service.get_next_text(
+    # Get all texts for navigation
+    all_texts = annotation_service.get_all_texts(
         annotator=annotator.name,
         clusters=annotator.clusters if annotator.clusters else None,
-        language=annotator.language,
-        min_annotators=settings.min_annotators,
-        show_skipped=show_skipped
+        language=annotator.language
     )
     
-    if not text_row:
-        st.success("✅ Все тексты размечены!")
+    if not all_texts:
+        st.success("🎉 Нет текстов для разметки!")
         st.balloons()
         return
+
+    # Initialize session state for current index
+    if "current_text_index" not in st.session_state:
+        # Find first unannotated
+        for i, t in enumerate(all_texts):
+            if not t["is_annotated"]:
+                st.session_state.current_text_index = i
+                break
+        else:
+            st.session_state.current_text_index = 0
+
+    # Ensure index is within bounds (e.g. after filter change)
+    if st.session_state.current_text_index >= len(all_texts):
+        st.session_state.current_text_index = 0
+        
+    # Sidebar navigation dropdown
+    st.sidebar.divider()
+    st.sidebar.write("🔎 **Навигация**")
     
-    text_id = text_row["id"]
-    text_content = text_row["text"]
+    # Filters
+    col_f1, col_f2, col_f3 = st.sidebar.columns(3)
+    with col_f1:
+        show_annotated = st.checkbox("✅", value=True, help="Размеченные")
+    with col_f2:
+        show_pending = st.checkbox("⬜️", value=True, help="Ожидающие")
+    with col_f3:
+        show_skipped = st.checkbox("⏭️", value=True, help="Пропущенные")
+    
+    # Filter texts
+    filtered_texts = []
+    text_to_original_index = {} # Map filtered index to original index in all_texts
+    
+    # helper to add text
+    def add_to_filtered(t, original_idx):
+        filtered_texts.append(t)
+        text_to_original_index[len(filtered_texts)-1] = original_idx
+
+    for i, t in enumerate(all_texts):
+        is_annotated = t["is_annotated"]
+        is_skipped = t["is_skipped"]
+        
+        # Determine status
+        if is_skipped:
+            if show_skipped:
+                add_to_filtered(t, i)
+        elif is_annotated:
+            if show_annotated:
+                add_to_filtered(t, i)
+        else:
+            if show_pending:
+                add_to_filtered(t, i)
+    
+    # Ensure current text is always in the list to prevent switching
+    current_real_id = all_texts[st.session_state.current_text_index]["id"]
+    current_in_list = False
+    for t in filtered_texts:
+        if t["id"] == current_real_id:
+            current_in_list = True
+            break
+            
+    if not current_in_list:
+        # Add current text to list (filtered_texts)
+        # We need to find its original index
+        # We know st.session_state.current_text_index matches all_texts
+        curr_t = all_texts[st.session_state.current_text_index]
+        # Insert in correct order or just append?
+        # Appending is safe. Or insert based on ID?
+        # Let's insert based on order in all_texts to maintain sort
+        # But that requires re-building.
+        # Simple fix: Append if not present.
+        add_to_filtered(curr_t, st.session_state.current_text_index)
+        # Re-sort filtered list by ID to match general order?
+        # The main loop pushed in order. The only out-of-order item could be this one.
+        # But users might expect ID order.
+        # Let's re-sort filtered_texts and rebuild map?
+        # Only if strict ID ordering is needed. For now appending is fine (it might appear at end if excluded).
+        # To affect selectbox nicely, maybe strict order is better.
+        # Optimization: Just loop again? No.
+        # Let's sort filtered_texts by ID.
+        # But we need to sync text_to_original_index.
+        # This is getting complex.
+        # Simpler: Modify the MAIN loop to ALWAYS include current_real_id.
+        pass
+
+    # Re-run loop with forced inclusion?
+    # Better: Reset and do it right.
+    filtered_texts = []
+    text_to_original_index = {} 
+    
+    for i, t in enumerate(all_texts):
+        is_annotated = t["is_annotated"]
+        is_skipped = t["is_skipped"]
+        is_current = (t["id"] == current_real_id)
+        
+        should_show = False
+        if is_current:
+            should_show = True
+        elif is_skipped:
+            if show_skipped:
+                should_show = True
+        elif is_annotated:
+            if show_annotated:
+                should_show = True
+        else:
+            if show_pending:
+                should_show = True
+                
+        if should_show:
+            filtered_texts.append(t)
+            text_to_original_index[len(filtered_texts)-1] = i
+
+    if not filtered_texts:
+        st.sidebar.info("Нет текстов, соответствующих фильтрам")
+        st.info("Выберите хотя бы один фильтр слева или измените параметры")
+        return
+
+    # Create options list for selectbox
+    # Format: "ID: [Status] Text..."
+    nav_options = []
+    for t in filtered_texts:
+        if t["is_skipped"]:
+            status = "⏭️"
+        elif t["is_annotated"]:
+            status = "✅"
+        else:
+            status = "⬜️"
+            
+        text_preview = t["request_text"][:30] + "..." if len(t["request_text"]) > 30 else t["request_text"]
+        nav_options.append(f"{t['id']}: {status} {text_preview}")
+    
+    # Determine safe index in FILTERED list
+    current_filtered_index = 0
+    # current_real_id is already known
+    
+    for idx, t in enumerate(filtered_texts):
+        if t["id"] == current_real_id:
+            current_filtered_index = idx
+            break
+    
+    selected_nav = st.sidebar.selectbox(
+        "Перейти к тексту:",
+        options=nav_options,
+        index=current_filtered_index,
+        key="nav_selectbox"
+    )
+    
+    # Update global index based on selection
+    selected_filtered_index = nav_options.index(selected_nav)
+    original_index = text_to_original_index[selected_filtered_index]
+    
+    if original_index != st.session_state.current_text_index:
+        st.session_state.current_text_index = original_index
+        st.rerun()
+
+    # Get current text
+    current_text = all_texts[st.session_state.current_text_index]
+    text_id = current_text["id"]
+    text_content = current_text["request_text"]
+    is_completed = current_text["is_annotated"]
+    is_skipped_status = current_text["is_skipped"]
+
+    # Navigation arrows (Main Area)
+    col_prev, col_status, col_next = st.columns([1, 4, 1])
+    
+    with col_prev:
+        if st.button("⬅️", use_container_width=False, disabled=st.session_state.current_text_index == 0):
+            st.session_state.current_text_index -= 1
+            st.rerun()
+            
+    with col_next:
+        if st.button("➡️", use_container_width=False, disabled=st.session_state.current_text_index == len(all_texts) - 1):
+            st.session_state.current_text_index += 1
+            st.rerun()
+            
+    with col_status:
+        # Centered text ID
+        st.markdown(f"<div style='text-align: center; margin-bottom: 5px;'>Текст {st.session_state.current_text_index + 1} из {len(all_texts)}</div>", unsafe_allow_html=True)
+        
+        # Centered status badge
+        if is_skipped_status:
+            st.markdown(
+                """
+                <div style='display: flex; justify-content: center;'>
+                    <div style='background-color: #e6f3ff; color: #0068c9; padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 14px; border: 1px solid #b3d9ff;'>
+                        ⏭️ Этот текст был пропущен
+                    </div>
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+        elif is_completed:
+            st.markdown(
+                """
+                <div style='display: flex; justify-content: center;'>
+                    <div style='background-color: #d1fae5; color: #065f46; padding: 0.5rem 1rem; border-radius: 0.5rem; font-size: 14px; border: 1px solid #a7f3d0;'>
+                        ✅ Этот текст уже размечен
+                    </div>
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+
     
     # Display text
     st.subheader("Текст для разметки:")
@@ -229,6 +445,27 @@ def show_annotation_interface(
     # Collect decisions
     st.subheader("Выберите подходящие интенты:")
     
+    # Inject JS for arrow key navigation
+    # This script finds all checkboxes and adds keyboard navigation
+    js_script = """
+    <script>
+    const checkboxes = Array.from(window.parent.document.querySelectorAll('div[data-testid="stCheckbox"] input'));
+    checkboxes.forEach((cb, index) => {
+        cb.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                const next = checkboxes[index + 1];
+                if (next) next.focus();
+            }
+            if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                const prev = checkboxes[index - 1];
+                if (prev) prev.focus();
+            }
+        });
+    });
+    </script>
+    """
+    components.html(js_script, height=0, width=0)
+    
     decisions = {}
     candidate_labels = [c.label for c in filtered_candidates]
     shown_intents_source = {}
@@ -242,12 +479,11 @@ def show_annotation_interface(
         
         # Format label
         label_text = f"**{candidate.label}** ({pct}%)"
-        help_text = intent.description if intent.description else None
         
+        # Remove tooltip/help as requested
         decision = st.checkbox(
             label_text, 
-            key=f"cand_{candidate.label}",
-            help=help_text
+            key=f"cand_{candidate.label}_{text_id}" # Unique key per text to reset state
         )
         
         if intent.description:
@@ -263,10 +499,16 @@ def show_annotation_interface(
                         if (not annotator.clusters or intent.cluster in annotator.clusters)
                         and label not in candidate_labels]
     
+    # Custom formatter with bold intent names
+    def format_intent_option(label):
+        intent = intents.get(label)
+        desc = f" - {intent.description}" if intent and intent.description else ""
+        return f"{to_bold(label)}{desc}"
+
     extra_labels = st.multiselect(
         "Добавить дополнительные интенты:",
         options=available_intents,
-        format_func=lambda x: f"{x} - {intents[x].description}" if intents[x].description else x
+        format_func=format_intent_option
     )
     
     for extra in extra_labels:
@@ -275,6 +517,26 @@ def show_annotation_interface(
     # Action buttons
     col1, col2, col3 = st.columns([1, 1, 2])
     
+    def find_next_pending_index(current_idx, all_texts):
+        # Search forward
+        for i in range(current_idx + 1, len(all_texts)):
+            if not all_texts[i]["is_annotated"] and not all_texts[i]["is_skipped"]:
+                return i
+        # Wrap around from start
+        for i in range(0, current_idx):
+            if not all_texts[i]["is_annotated"] and not all_texts[i]["is_skipped"]:
+                return i
+        # If no strict pending found, try to find ANY unannotated (including skipped)
+        for i in range(current_idx + 1, len(all_texts)):
+            if not all_texts[i]["is_annotated"]:
+                return i
+        for i in range(0, current_idx):
+            if not all_texts[i]["is_annotated"]:
+                return i
+                
+        # If all done, stay current
+        return min(current_idx + 1, len(all_texts) - 1)
+
     with col1:
         if st.button("✅ Сохранить", type="primary", use_container_width=True):
             annotation_service.save_annotations(
@@ -286,12 +548,20 @@ def show_annotation_interface(
                 shown_intents_source=shown_intents_source
             )
             st.success("Сохранено!")
+            
+            # Jump to next pending text
+            next_idx = find_next_pending_index(st.session_state.current_text_index, all_texts)
+            st.session_state.current_text_index = next_idx
             st.rerun()
     
     with col2:
         if st.button("⏭️ Пропустить", use_container_width=True):
             annotation_service.skip_text(text_id, annotator.name)
             st.info("Текст пропущен")
+            
+            # Jump to next pending text (same logic as save)
+            next_idx = find_next_pending_index(st.session_state.current_text_index, all_texts)
+            st.session_state.current_text_index = next_idx
             st.rerun()
     
     with col3:

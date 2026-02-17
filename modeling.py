@@ -1,16 +1,11 @@
 import os
 import random
-from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 DEFAULT_TOP_K = int(os.environ.get("TEXTS_TOP_K", "5"))
 
 
-@dataclass
-class Candidate:
-    label: str
-    rank: int
-    probability: float
+from src.models.candidate import Candidate
 
 
 class TopKModelStub:

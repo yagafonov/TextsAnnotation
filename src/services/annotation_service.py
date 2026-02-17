@@ -138,3 +138,25 @@ class AnnotationService:
             clusters=clusters,
             language=language
         )
+
+    def get_all_texts(
+        self,
+        annotator: str,
+        clusters: Optional[List[str]] = None,
+        language: Optional[str] = None
+    ) -> List[dict]:
+        """Get all texts for navigation.
+        
+        Args:
+            annotator: Annotator name
+            clusters: Filter by clusters
+            language: Filter by language
+            
+        Returns:
+            List of dicts with id, request_text, is_annotated
+        """
+        return self.text_repo.get_all_texts_for_annotator(
+            annotator=annotator,
+            clusters=clusters,
+            language=language
+        )

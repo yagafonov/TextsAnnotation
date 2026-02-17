@@ -36,7 +36,7 @@ class TestAnnotationServiceGetNextText:
         
         # Assert: Text is returned
         assert next_text is not None
-        assert next_text["text"] == "Test annotation text"
+        assert next_text["request_text"] == "Test annotation text"
         assert next_text["language"] == "ru"
     
     def test_get_next_text_filters_by_cluster(self, temp_db, text_repo):
