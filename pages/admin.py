@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from src.repositories.base import BaseRepository
+
 from src.repositories.intent_repo import IntentRepository
 from src.services.import_service import ImportService
 from src.services.stats_service import StatsService
@@ -517,44 +517,6 @@ def show_export_section(stats_service: StatsService):
             
             count = stats_service.export_annotations(output_path)
             st.success(f"✅ Экспортировано {count} записей в {output_path}")
-    
-    with col2:
-        # Create data/model versions (matching original db.py behavior)
-        repo = BaseRepository(settings.db_path)
-        
-        if st.button("🏷️ Создать версию данных"):
-            with get_connection(settings.db_path) as conn:
-                # Get current version from settings
-                result = conn.execute("SELECT value FROM settings WHERE key = 'current_data_version'").fetchone()
-                current = int(result["value"]) if result else 0
-                new_version = current + 1
-                
-                # Update setting only (original behavior - no table insert)
-                conn.execute(
-                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                    ("current_data_version", str(new_version))
-                )
-                conn.commit()
-            st.success(f"✅ Создана версия данных #{new_version}")
-        
-        if st.button("🤖 Создать версию модели"):
-            with get_connection(settings.db_path) as conn:
-                # Get current version from settings
-                result = conn.execute("SELECT value FROM settings WHERE key = 'current_model_version'").fetchone()
-                current = int(result["value"]) if result else 0
-                new_version = current + 1
-                
-                # Insert into model_versions table AND update setting (original behavior)
-                conn.execute(
-                    "INSERT INTO model_versions (version, note, created_at) VALUES (?, ?, datetime('now'))",
-                    (new_version, "Manual version")
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                    ("current_model_version", str(new_version))
-                )
-                conn.commit()
-            st.success(f"✅ Создана версия модели #{new_version}")
 
 
 def show_import_section():
