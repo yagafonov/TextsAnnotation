@@ -508,7 +508,7 @@ def show_export_section(stats_service: StatsService):
     """Display export options."""
     st.header("💾 Экспорт данных")
     
-    col1, col2 = st.columns(2)
+    col1 = st.columns(1)[0]
     
     with col1:
         if st.button("📥 Экспортировать аннотации", type="primary"):
