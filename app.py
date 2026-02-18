@@ -228,7 +228,8 @@ def show_annotation_interface(
         
         if st.button("🚪 Выйти"):
             st.session_state.authenticated_user = None
-            cookie_manager.delete("annotator_user")
+            if cookie_manager.get("annotator_user"):
+                cookie_manager.delete("annotator_user")
             st.query_params.clear()
             st.rerun()
         
