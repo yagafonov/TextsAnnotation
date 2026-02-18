@@ -144,13 +144,13 @@ class AnnotationService:
 
     @st.cache_data
     def get_all_texts(
-        self,
+        _self,
         annotator: str,
         clusters: Optional[List[str]] = None,
         language: Optional[str] = None
     ) -> List[dict]:
         """Get all texts for navigation (cached)."""
-        return self.text_repo.get_all_texts_for_annotator(
+        return _self.text_repo.get_all_texts_for_annotator(
             annotator=annotator,
             clusters=clusters,
             language=language
