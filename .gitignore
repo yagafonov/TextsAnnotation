@@ -8,3 +8,7 @@ __pycache__/
 data/raw_texts_with_preds
 .env
 .streamlit/
+logs
+.DS_Store
+data/uploads
+exports
