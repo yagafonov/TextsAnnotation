@@ -2,10 +2,12 @@
 
 from typing import Dict, List, Optional, Tuple
 
+from src.models.annotator import Annotator
 from src.models.candidate import Candidate
 from src.models.text import Text
 from src.repositories.annotation_repo import AnnotationRepository
 from src.repositories.text_repo import TextRepository
+from src.utils.database import get_connection
 from src.utils.logger import logger
 
 
@@ -160,3 +162,91 @@ class AnnotationService:
             clusters=clusters,
             language=language
         )
+
+    def calculate_assignment(self, candidates: List[Candidate], annotators: List[Annotator], language: str) -> Optional[str]:
+        """Calculate best annotator assignment based on intent weights.
+        
+        Args:
+            candidates: List of prediction candidates
+            annotators: List of available annotators
+            language: Text language
+            
+        Returns:
+            Name of assigned annotator or None
+        """
+        # Filter annotators by language
+        eligible_annotators = [a for a in annotators if a.language == language and a.intents]
+        
+        if not eligible_annotators:
+            return None
+            
+        best_annotator = None
+        max_score = 0.0
+        
+        for annotator in eligible_annotators:
+            # Score = sum of probabilities for candidates matching annotator's intents
+            score = sum(c.probability for c in candidates if c.label in annotator.intents)
+            
+            if score > max_score:
+                max_score = score
+                best_annotator = annotator.name
+                
+        return best_annotator
+
+    def assign_unannotated_texts(self, annotators: List[Annotator]) -> int:
+        """Re-assign all unannotated texts based on current annotator configuration.
+        
+        Args:
+            annotators: List of all annotators
+            
+        Returns:
+            Count of updated texts
+        """
+        # Fetch ALL unannotated texts (we need a new repo method or iterate)
+        # Iterating might be slow if many texts. 
+        # But we need candidates for each.
+        # Let's add a method to repo to get ALL unannotated texts regardless of user.
+        # Or simple SQL.
+        
+        # For now, let's just get IDs of unannotated texts.
+        # Then for each, get candidates, calculate, update.
+        
+        logger.info("Starting re-assignment of unannotated texts...")
+        updated_count = 0
+        
+        with get_connection(self.text_repo.db_path) as conn:
+            # Get unannotated texts that need assignment check
+            # We treat all unannotated texts as candidates for re-assignment
+            # regardless of current assigned_to (in case config changed)
+            rows = conn.execute("""
+                SELECT t.id, t.language, t.assigned_to 
+                FROM texts t
+                LEFT JOIN annotations a ON a.text_id = t.id
+                WHERE a.id IS NULL
+            """).fetchall()
+            
+            for row in rows:
+                text_id = row["id"]
+                language = row["language"]
+                current_assigned = row["assigned_to"]
+                
+                # Get candidates
+                # Using internal repo method or direct SQL for speed?
+                # Repo method is fine.
+                candidates = self.text_repo.get_candidates(text_id)
+                
+                # Calculate new assignment
+                new_assigned = self.calculate_assignment(candidates, annotators, language)
+                
+                # Update if changed
+                if new_assigned != current_assigned:
+                    conn.execute(
+                        "UPDATE texts SET assigned_to = ? WHERE id = ?",
+                        (new_assigned, text_id)
+                    )
+                    updated_count += 1
+            
+            conn.commit()
+            
+        logger.info(f"Re-assigned {updated_count} texts")
+        return updated_count

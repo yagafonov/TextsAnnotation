@@ -27,7 +27,9 @@ class ImportService:
         intents: Dict[str, Intent],
         top_k: int,
         model_version: int,
-        data_version: int
+        data_version: int,
+        annotators: list = None,
+        annotation_service = None
     ) -> int:
         """Import texts from CSV file with model predictions.
         
@@ -37,6 +39,8 @@ class ImportService:
             top_k: Number of top candidates to generate
             model_version: Current model version
             data_version: Current data version
+            annotators: List of annotators for assignment
+            annotation_service: Service to calculate assignment
             
         Returns:
             Number of texts imported
@@ -72,6 +76,11 @@ class ImportService:
                         if top_candidate_label in intents:
                             assigned_cluster = intents[top_candidate_label].cluster
                     
+                    # Calculate assignment if services provided
+                    assigned_to = None
+                    if annotators and annotation_service:
+                        assigned_to = annotation_service.calculate_assignment(candidates, annotators, language)
+                    
                     # Create text with candidates
                     self.text_repo.create(
                         text=text,
@@ -80,7 +89,8 @@ class ImportService:
                         assigned_cluster=assigned_cluster,
                         data_version=data_version,
                         candidates=candidates,
-                        model_version=model_version
+                        model_version=model_version,
+                        assigned_to=assigned_to
                     )
                     
                     imported_count += 1

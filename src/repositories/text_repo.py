@@ -21,7 +21,8 @@ class TextRepository(BaseRepository):
         assigned_cluster: Optional[str],
         data_version: int,
         candidates: List[Candidate],
-        model_version: int
+        model_version: int,
+        assigned_to: Optional[str] = None
     ) -> int:
         """Create a new text with candidates.
         
@@ -33,6 +34,7 @@ class TextRepository(BaseRepository):
             data_version: Data version
             candidates: List of ML candidates
             model_version: Model version
+            assigned_to: Pre-assigned annotator
             
         Returns:
             ID of created text
@@ -40,10 +42,10 @@ class TextRepository(BaseRepository):
         with get_connection(self.db_path) as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO texts (text, language, clusters, assigned_cluster, data_version, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO texts (text, language, clusters, assigned_cluster, assigned_to, data_version, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (text, language, clusters, assigned_cluster, data_version, datetime.now(timezone.utc).isoformat())
+                (text, language, clusters, assigned_cluster, assigned_to, data_version, datetime.now(timezone.utc).isoformat())
             )
             text_id = cursor.lastrowid
             
@@ -65,7 +67,7 @@ class TextRepository(BaseRepository):
                 )
             
             conn.commit()
-            logger.info(f"Created text#{text_id} with {len(candidates)} candidates")
+            logger.info(f"Created text#{text_id} with {len(candidates)} candidates (assigned_to: {assigned_to})")
             return text_id
     
     def get_by_id(self, text_id: int) -> Optional[Text]:
@@ -86,6 +88,7 @@ class TextRepository(BaseRepository):
                     language, 
                     clusters, 
                     assigned_cluster, 
+                    assigned_to,
                     data_version, 
                     created_at 
                 FROM texts WHERE id = ?
@@ -102,6 +105,7 @@ class TextRepository(BaseRepository):
                 language=row["language"],
                 clusters=row["clusters"],
                 assigned_cluster=row["assigned_cluster"],
+                assigned_to=row["assigned_to"],
                 data_version=row["data_version"],
                 created_at=row["created_at"]
             )
@@ -192,6 +196,7 @@ class TextRepository(BaseRepository):
                         t.language,
                         t.clusters,
                         t.assigned_cluster,
+                        t.assigned_to,
                         t.data_version,
                         t.created_at,
                         COUNT(DISTINCT a.annotator) as annotators
@@ -199,22 +204,47 @@ class TextRepository(BaseRepository):
                     LEFT JOIN annotations a ON a.text_id = t.id
                 """
                 params = []
+                # Exclude if already annotated or skipped by this annotator
                 filters = [
                     "NOT EXISTS (SELECT 1 FROM annotations a2 WHERE a2.text_id = t.id AND a2.annotator = ?)",
                     "NOT EXISTS (SELECT 1 FROM skipped_texts s WHERE s.text_id = t.id AND s.annotator = ?)"
                 ]
                 params.extend([annotator, annotator])
             
-            # Add cluster filter
+            # ASSIGNMENT LOGIC:
+            # 1. If assigned_to is set, it MUST match annotator
+            # 2. If assigned_to is NULL, use Cluster/Language logic
+            
+            # Combine into a complex OR clause:
+            # (assigned_to = ? OR (assigned_to IS NULL AND [cluster/lang filters]))
+            
+            assignment_clause = "(t.assigned_to = ?"
+            assignment_params = [annotator]
+            
+            fallback_filters = []
+            
+            # Add cluster filter to fallback
             if clusters:
                 placeholders = ", ".join("?" for _ in clusters)
-                filters.append(f"t.assigned_cluster IN ({placeholders})")
-                params.extend(clusters)
+                fallback_filters.append(f"t.assigned_cluster IN ({placeholders})")
+                assignment_params.extend(clusters)
             
-            # Add language filter
+            # Add language filter to fallback
             if language:
-                filters.append("(t.language = ? OR t.language IS NULL)")
-                params.append(language)
+                fallback_filters.append("(t.language = ? OR t.language IS NULL)")
+                assignment_params.append(language)
+                
+            if fallback_filters:
+                assignment_clause += f" OR (t.assigned_to IS NULL AND {' AND '.join(fallback_filters)})"
+            else:
+                 # If no fallback filters, assume all unassigned are visible? 
+                 # Or strict? Usually there are filters. If none, allow all unassigned.
+                assignment_clause += " OR t.assigned_to IS NULL"
+                
+            assignment_clause += ")"
+            
+            filters.append(assignment_clause)
+            params.extend(assignment_params)
             
             # Build final query
             where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
@@ -243,6 +273,7 @@ class TextRepository(BaseRepository):
                 SELECT
                     t.id,
                     t.text as request_text,
+                    t.assigned_to,
                     CASE 
                         WHEN EXISTS (SELECT 1 FROM annotations a WHERE a.text_id = t.id AND a.annotator = ?) THEN 1
                         ELSE 0
@@ -256,16 +287,31 @@ class TextRepository(BaseRepository):
             params = [annotator, annotator]
             filters = []
             
+            # ASSIGNMENT LOGIC (Same as above)
+            assignment_clause = "(t.assigned_to = ?"
+            assignment_params = [annotator]
+            
+            fallback_filters = []
+            
             # Add cluster filter
             if clusters:
                 placeholders = ", ".join("?" for _ in clusters)
-                filters.append(f"t.assigned_cluster IN ({placeholders})")
-                params.extend(clusters)
+                fallback_filters.append(f"t.assigned_cluster IN ({placeholders})")
+                assignment_params.extend(clusters)
             
             # Add language filter
             if language:
-                filters.append("(t.language = ? OR t.language IS NULL)")
-                params.append(language)
+                fallback_filters.append("(t.language = ? OR t.language IS NULL)")
+                assignment_params.append(language)
+            
+            if fallback_filters:
+                assignment_clause += f" OR (t.assigned_to IS NULL AND {' AND '.join(fallback_filters)})"
+            else:
+                assignment_clause += " OR t.assigned_to IS NULL"
+                
+            assignment_clause += ")"
+            filters.append(assignment_clause)
+            params.extend(assignment_params)
             
             where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
             query = f"{base_query} {where_clause} ORDER BY t.id ASC"

@@ -142,6 +142,7 @@ def init_database(db_path: str) -> None:
                 language TEXT,
                 clusters TEXT,
                 assigned_cluster TEXT,
+                assigned_to TEXT,
                 data_version INTEGER NOT NULL,
                 created_at TEXT NOT NULL
             )

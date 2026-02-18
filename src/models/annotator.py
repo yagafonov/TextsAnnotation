@@ -12,6 +12,7 @@ class Annotator(BaseModel):
     password: str = Field(..., min_length=1, description="Annotator password")
     language: str = Field(..., min_length=2, max_length=10, description="Annotator's working language")
     clusters: List[str] = Field(default_factory=list, description="Allowed clusters for this annotator")
+    intents: List[str] = Field(default_factory=list, description="Preferred intents for assignment")
     
     @validator("language", pre=True)
     def normalize_language(cls, v):

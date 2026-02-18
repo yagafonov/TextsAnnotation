@@ -37,7 +37,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-@st.cache_resource(experimental_allow_widgets=True)
+# @st.cache_resource removed due to CachedWidgetWarning
 def get_cookie_manager():
     return stx.CookieManager()
 
@@ -102,12 +102,18 @@ def handle_import(services: dict, intents: Dict[str, Intent]):
     current_model_version = int(intent_repo.get_setting("current_model_version", "0"))
     current_data_version = int(intent_repo.get_setting("current_data_version", "0"))
     
+    # Get annotators for assignment
+    auth_service: AuthService = services["auth"]
+    annotators_config = auth_service.load_annotators()
+    
     count = import_service.import_from_csv(
         csv_path=settings.import_csv_path,
         intents=intents,
         top_k=settings.top_k,
         model_version=current_model_version,
-        data_version=current_data_version
+        data_version=current_data_version,
+        annotators=annotators_config.annotators,
+        annotation_service=services["annotation"]
     )
     
     if count > 0:
@@ -154,7 +160,7 @@ def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
                 help="Выберите ваше имя из списка"
             )
             password = st.text_input("Пароль", type="password")
-            submitted = st.form_submit_button("Войти", use_container_width=True)
+            submitted = st.form_submit_button("Войти", width="stretch")
             
             if submitted:
                 annotator = auth_service.authenticate(username, password)
@@ -407,12 +413,12 @@ def show_annotation_interface(
     col_prev, col_status, col_next = st.columns([1, 4, 1])
     
     with col_prev:
-        if st.button("⬅️", use_container_width=False, disabled=st.session_state.current_text_index == 0):
+        if st.button("⬅️", width="content", disabled=st.session_state.current_text_index == 0):
             st.session_state.current_text_index -= 1
             st.rerun()
             
     with col_next:
-        if st.button("➡️", use_container_width=False, disabled=st.session_state.current_text_index == len(all_texts) - 1):
+        if st.button("➡️", width="content", disabled=st.session_state.current_text_index == len(all_texts) - 1):
             st.session_state.current_text_index += 1
             st.rerun()
             
@@ -554,7 +560,7 @@ def show_annotation_interface(
         return min(current_idx + 1, len(all_texts) - 1)
 
     with col1:
-        if st.button("✅ Сохранить", type="primary", use_container_width=True):
+        if st.button("✅ Сохранить", type="primary", width="stretch"):
             annotation_service.save_annotations(
                 text_id=text_id,
                 annotator=annotator.name,
@@ -572,7 +578,7 @@ def show_annotation_interface(
             st.rerun()
     
     with col2:
-        if st.button("⏭️ Пропустить", use_container_width=True):
+        if st.button("⏭️ Пропустить", width="stretch"):
             annotation_service.skip_text(text_id, annotator.name)
             st.info("Текст пропущен")
             
@@ -583,11 +589,19 @@ def show_annotation_interface(
             st.rerun()
     
     with col3:
-        if show_skipped and st.button("🔄 Вернуть в работу", use_container_width=True):
+        if show_skipped and st.button("🔄 Вернуть в работу", width="stretch"):
             annotation_service.unskip_text(text_id, annotator.name)
             st.info("Текст возвращён в работу")
             st.rerun()
 
+
+@st.cache_resource
+def ensure_assignments(annotators_hash: str, _annotation_service: AnnotationService, _auth_service: AuthService):
+    """Ensure texts are correctly assigned based on current annotators."""
+    annotators = _auth_service.load_annotators().annotators
+    count = _annotation_service.assign_unannotated_texts(annotators)
+    if count > 0:
+        logger.info(f"Re-assignment triggered by config change. Updated {count} texts.")
 
 def main():
     """Main application entry point."""
@@ -603,6 +617,15 @@ def main():
     
     # Authenticate
     auth_service: AuthService = services["auth"]
+    
+    # Trigger rebalancing if needed
+    # We use a hash of the annotators config to detect changes
+    config = auth_service.load_annotators()
+    # Simple hash: names + intents
+    # If intents change, assignments might change.
+    annotators_repr = "".join(sorted([f"{a.name}:{','.join(sorted(a.intents))}" for a in config.annotators]))
+    ensure_assignments(annotators_repr, services["annotation"], auth_service)
+    
     annotator = authenticate_user(auth_service)
     
     # Show annotation interface

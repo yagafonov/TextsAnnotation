@@ -14,13 +14,14 @@ class Text(BaseModel):
     language: Optional[str] = Field(default=None, max_length=10, description="Text language")
     clusters: Optional[str] = Field(default=None, description="Associated clusters")
     assigned_cluster: Optional[str] = Field(default=None, description="Primary assigned cluster")
+    assigned_to: Optional[str] = Field(default=None, description="Assigned annotator")
     data_version: int = Field(default=0, description="Data version")
     created_at: Optional[str] = Field(default=None, description="Creation timestamp")
     
     class Config:
         json_schema_extra = {
             "example": {
-                "text": "Как перевести деньги?",
+                "request_text": "Как перевести деньги?",
                 "language": "ru",
                 "assigned_cluster": "transactions",
                 "data_version": 1

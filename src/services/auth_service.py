@@ -51,6 +51,10 @@ class AuthService:
                 # Handle both 'cluster' and 'clusters' fields
                 if "cluster" in annotator and "clusters" not in annotator:
                     annotator["clusters"] = annotator.pop("cluster")
+                
+                # Handle 'intent' -> 'intents'
+                if "intent" in annotator and "intents" not in annotator:
+                    annotator["intents"] = annotator.pop("intent")
         
         self._config = AnnotatorConfig(**data)
         logger.info(f"Loaded {len(self._config.annotators)} annotators")

@@ -49,7 +49,7 @@ def authenticate_admin():
     if st.session_state.admin_authenticated:
         with st.sidebar:
             st.success("✅ Администратор авторизован")
-            if st.button("🚪 Выйти", use_container_width=True):
+            if st.button("🚪 Выйти", width="stretch"):
                 st.session_state.admin_authenticated = False
                 cookie_manager.delete("admin_token")
                 st.rerun()
@@ -80,7 +80,7 @@ def authenticate_admin():
             st.error(st.session_state.admin_auth_error)
             st.session_state.admin_auth_error = None
 
-        if st.button("Войти", use_container_width=True):
+        if st.button("Войти", width="stretch"):
             try_authenticate()
             if st.session_state.admin_authenticated:
                 st.rerun()
@@ -137,7 +137,7 @@ def show_annotator_stats(stats_service: StatsService):
                 "yes_rate": "% Да"
             },
             hide_index=True,
-            use_container_width=True
+            width="stretch"
         )
     else:
         st.info("Нет данных")
@@ -160,6 +160,23 @@ def show_intent_quality(stats_service: StatsService):
         df['miss_rate'] = df['miss_rate'].apply(
             lambda x: f"{x*100:.1f}%" if pd.notna(x) else "N/A"
         )
+        df['annotation_rate'] = df['annotation_rate'].apply(
+            lambda x: f"{x*100:.1f}%" if pd.notna(x) else "N/A"
+        )
+        
+        # Format confusion percentage for sorting
+        df['confusion_percentage_val'] = df['confusion_percentage'].apply(
+            lambda x: round(x * 100, 1) if pd.notna(x) else 0.0
+        )
+        
+        # Construct deep dive URL for each row
+        # Format: /admin?tab=...&human=...&top5=...
+        target_tab = "📝 Тексты"
+        df['confusion_link'] = df.apply(
+            lambda r: f"/admin?tab={target_tab}&human={r['label']}&top5={r['confusion_label']}&pg=1" 
+            if pd.notna(r['confusion_label']) else None, 
+            axis=1
+        )
         
         st.dataframe(
             df,
@@ -171,13 +188,266 @@ def show_intent_quality(stats_service: StatsService):
                 "top1_accepted": "Принято как Top-1",
                 "missed": "Пропущено моделью",
                 "top1_precision": "Точность Top-1",
-                "miss_rate": "% Пропусков"
+                "miss_rate": "% Пропусков",
+                "annotation_rate": "% Разметки",
+                "confusion_link": st.column_config.LinkColumn(
+                    "Чаще всего спутан с",
+                    help="Нажмите на название, чтобы увидеть примеры путаницы в разделе Тексты",
+                    display_text=r"top5=([^&]+)" # Extract intent name from URL for display
+                ),
+                "confusion_percentage_val": st.column_config.NumberColumn(
+                    "% Путаницы", 
+                    format="%.1f%%",
+                    help="Процент случаев, когда модель предсказала этот интент вместо верного"
+                )
             },
+            column_order=[
+                "label", "cluster", "complexity", 
+                "top1_shown", "top1_accepted", "top1_precision", 
+                "missed", "miss_rate", "annotation_rate", 
+                "confusion_link", "confusion_percentage_val"
+            ],
             hide_index=True,
-            use_container_width=True
+            width="stretch"
         )
+        
     else:
         st.info("Нет данных о качестве интентов")
+
+
+def show_text_overview(stats_service: StatsService):
+    """Display detailed text overview with filters and pagination."""
+    st.header("📝 Обзор текстов")
+    
+    # All metadata for filters
+    all_intents = stats_service.get_all_intents()
+    all_annotators = stats_service.get_unique_assigned_annotators()
+    
+    # 1. Filters Section
+    with st.expander("🔍 Фильтры", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            search_query = st.text_input("Поиск по тексту", placeholder="Введите часть текста...", key="filter_search")
+            is_annotated_option = st.radio(
+                "Статус разметки",
+                options=["Все", "Размечено", "Не размечено"],
+                horizontal=True
+            )
+            is_annotated = None
+            if is_annotated_option == "Размечено": is_annotated = True
+            elif is_annotated_option == "Не размечено": is_annotated = False
+
+        with col2:
+            # Persistent filters from query params
+            q_top5 = st.query_params.get_all("top5")
+            q_human = st.query_params.get_all("human")
+            
+            # Initialize from query params if not yet in session state
+            if "filter_top5" not in st.session_state:
+                st.session_state.filter_top5 = [it for it in q_top5 if it in all_intents]
+            if "filter_human" not in st.session_state:
+                st.session_state.filter_human = [it for it in q_human if it in all_intents]
+            
+            top5_intents = st.multiselect(
+                "Интенты (Top-5)",
+                options=all_intents,
+                key="filter_top5",
+                help="Показать тексты, где эти интенты входят в Top-5 предсказаний"
+            )
+            human_intents = st.multiselect(
+                "Интенты (аннотаторы)",
+                options=all_intents,
+                key="filter_human",
+                help="Показать тексты, где аннотаторы выбрали эти интенты (Yes)"
+            )
+            
+            # Sync back to query params
+            if top5_intents != q_top5: st.query_params["top5"] = top5_intents
+            if human_intents != q_human: st.query_params["human"] = human_intents
+        
+        with col3:
+            assigned_annotators = st.multiselect(
+                "Назначено на",
+                options=all_annotators,
+                key="filter_assigned",
+                help="Фильтр по назначенным аннотаторам"
+            )
+            only_disagreements = st.toggle("Только разногласия", key="filter_disagreements", help="Показать тексты, где аннотаторы разошлись во мнениях")
+
+    # 2. Base Count for pagination (needed before fetching data)
+    total_count = stats_service.get_text_count(
+        search_query=search_query,
+        top5_intents=top5_intents,
+        human_intents=human_intents,
+        assigned_annotators=assigned_annotators,
+        is_annotated=is_annotated,
+        only_disagreements=only_disagreements
+    )
+    
+    # Initial page settings
+    # Initialize from query params if possible to persist across reloads
+    if "text_overview_page" not in st.session_state:
+        q_page = st.query_params.get("pg")
+        st.session_state.text_overview_page = int(q_page) if q_page and q_page.isdigit() else 1
+        
+    if "text_overview_limit" not in st.session_state:
+        q_limit = st.query_params.get("lim")
+        if q_limit:
+            st.session_state.text_overview_limit = int(q_limit) if q_limit.isdigit() else q_limit
+        else:
+            st.session_state.text_overview_limit = 100
+
+    limit = st.session_state.text_overview_limit
+    page_number = st.session_state.text_overview_page
+    
+    # Update query params to keep URL in sync
+    st.query_params["pg"] = page_number
+    st.query_params["lim"] = limit
+    
+    # Ensure page number is valid
+    if limit != "Все":
+        total_pages = (total_count - 1) // limit + 1
+        if page_number > total_pages: 
+            page_number = max(1, total_pages)
+            st.session_state.text_overview_page = page_number
+            st.query_params["pg"] = page_number
+    else:
+        page_number = 1
+        limit_val = None
+    
+    limit_val = limit if limit != "Все" else None
+    offset = (page_number - 1) * (limit_val or 0)
+
+    # 3. Data Fetching
+    df = stats_service.get_text_detailed_overview(
+        search_query=search_query,
+        top5_intents=top5_intents,
+        human_intents=human_intents,
+        assigned_annotators=assigned_annotators,
+        is_annotated=is_annotated,
+        only_disagreements=only_disagreements,
+        limit=limit_val,
+        offset=offset
+    )
+    
+    if not df.empty:
+        st.write(f"Показано текстов: **{len(df)}** из **{total_count}**")
+        
+        # Dynamic columns for human intents start with "Chosen Intent"
+        chosen_cols = [c for c in df.columns if c.startswith("Chosen Intent")]
+        model_cols = [f"Model Top {i}" for i in range(1, 6)]
+        
+        # Format disagreement column
+        df['disagreement_icon'] = df['has_disagreement'].apply(lambda x: "⚠️" if x else "")
+        
+        # Display the dataframe
+        st.dataframe(
+            df,
+            column_config={
+                "id": st.column_config.NumberColumn("ID", width="small"),
+                "disagreement_icon": st.column_config.TextColumn("⚠️", width="small", help="Разногласия в разметке"),
+                "text": st.column_config.TextColumn("Текст", width="large"),
+                "assigned_to": "Назначено",
+                "actual_annotators": "Размечали",
+                "cluster": "Кластер",
+                **{c: st.column_config.TextColumn(c, width="medium") for c in model_cols},
+                **{c: st.column_config.TextColumn(c, width="medium") for c in chosen_cols}
+            },
+            column_order=["id", "disagreement_icon", "text", "assigned_to", "actual_annotators", "cluster"] + model_cols + chosen_cols,
+            hide_index=True,
+            width="stretch",
+            height="content"  # Grow to fit content
+        )
+    else:
+        st.info("Тексты не найдены")
+
+    # 4. Pagination Section at the Bottom
+    st.divider()
+    b_col1, b_col2, b_col3 = st.columns([2, 2, 1])
+    
+    with b_col3:
+        new_limit = st.selectbox(
+            "Текстов на странице",
+            options=[25, 50, 100, 250, "Все"],
+            index=[25, 50, 100, 250, "Все"].index(limit) if limit in [25, 50, 100, 250, "Все"] else 2,
+            key="text_overview_limit_select"
+        )
+        if new_limit != limit:
+            st.session_state.text_overview_limit = new_limit
+            st.session_state.text_overview_page = 1
+            st.rerun()
+
+    if limit != "Все":
+        total_pages = (total_count - 1) // limit + 1
+        if total_pages > 1:
+            with b_col1:
+                # Optimized pagination layout: [First][Prev] [Numbers + Dropdown] [Next][Last]
+                pg_cols = st.columns([0.6, 0.6, 5.0, 0.6, 0.6])
+                
+                with pg_cols[0]:
+                    if st.button("⏪", disabled=(page_number == 1), key="pg_first", use_container_width=True):
+                        st.session_state.text_overview_page = 1
+                        st.session_state.pg_jump_select = 1
+                        st.rerun()
+                
+                with pg_cols[1]:
+                    if st.button("◀️", disabled=(page_number == 1), key="pg_prev", use_container_width=True):
+                        new_pg = max(1, page_number - 1)
+                        st.session_state.text_overview_page = new_pg
+                        st.session_state.pg_jump_select = new_pg
+                        st.rerun()
+                
+                with pg_cols[2]:
+                    # Vertical stack: Numbers on top, Dropdown below
+                    # 1. Page numbers
+                    start_pg = max(1, page_number - 2)
+                    end_pg = min(total_pages, page_number + 2)
+                    if end_pg - start_pg < 4:
+                        if start_pg == 1: end_pg = min(total_pages, 5)
+                        elif end_pg == total_pages: start_pg = max(1, total_pages - 4)
+                    
+                    p_nums = list(range(start_pg, end_pg + 1))
+                    pg_nums = st.columns(len(p_nums))
+                    for idx, p in enumerate(p_nums):
+                        if pg_nums[idx].button(
+                            str(p), 
+                            type="primary" if p == page_number else "secondary",
+                            key=f"pg_num_{p}",
+                            use_container_width=True
+                        ):
+                            st.session_state.text_overview_page = p
+                            st.session_state.pg_jump_select = p
+                            st.rerun()
+                    
+                    # 2. Jump to page dropdown (compact version)
+                    if "pg_jump_select" not in st.session_state or st.session_state.pg_jump_select != page_number:
+                        st.session_state.pg_jump_select = page_number
+                        
+                    chosen_page = st.selectbox(
+                        "К стр.",
+                        options=list(range(1, total_pages + 1)),
+                        key="pg_jump_select",
+                        label_visibility="collapsed"
+                    )
+                    if chosen_page != page_number:
+                        st.session_state.text_overview_page = chosen_page
+                        st.rerun()
+
+                with pg_cols[3]:
+                    if st.button("▶️", disabled=(page_number == total_pages), key="pg_next", use_container_width=True):
+                        new_pg = min(total_pages, page_number + 1)
+                        st.session_state.text_overview_page = new_pg
+                        st.session_state.pg_jump_select = new_pg
+                        st.rerun()
+                        
+                with pg_cols[4]:
+                    if st.button("⏩", disabled=(page_number == total_pages), key="pg_last", use_container_width=True):
+                        st.session_state.text_overview_page = total_pages
+                        st.session_state.pg_jump_select = total_pages
+                        st.rerun()
+    
+    with b_col2:
+        st.write(f"Всего текстов: {total_count}")
 
 
 def show_cluster_progress(stats_service: StatsService):
@@ -199,7 +469,7 @@ def show_cluster_progress(stats_service: StatsService):
                 "completion_rate": "% Завершено"
             },
             hide_index=True,
-            use_container_width=True
+            width="stretch"
         )
         
         # Visualize progress
@@ -228,7 +498,7 @@ def show_disagreements(stats_service: StatsService):
                 "no_count": "Нет"
             },
             hide_index=True,
-            use_container_width=True
+            width="stretch"
         )
     else:
         st.success("✅ Разногласий не найдено")
@@ -357,7 +627,7 @@ def show_import_section():
             
             # Show preview
             st.subheader("👁️ Предварительный просмотр")
-            st.dataframe(df.head(10), use_container_width=True)
+            st.dataframe(df.head(10), width="stretch")
             
             # Import button
             st.subheader("▶️ Выполнить импорт")
@@ -456,25 +726,42 @@ def main():
     # Initialize service
     stats_service = StatsService(settings.db_path)
     
-    # Navigation
+    # Navigation Tabs Definition
     tabs = [
         "📊 Обзор",
         "👥 Аннотаторы",
         "🎯 Качество",
+        "📝 Тексты",
         "📈 Кластеры",
         "⚠️ Разногласия",
         "💾 Экспорт",
         "📥 Импорт"
     ]
     
-    # Initialize session state for tab if not exists
+    # Persistent tab via cookies
+    saved_tab = cookie_manager.get("admin_active_tab")
+    q_tab = st.query_params.get("tab")
+    
+    # Initialize session state if fresh
     if "admin_active_tab" not in st.session_state:
-        st.session_state.admin_active_tab = "📊 Обзор"
+        if q_tab in tabs:
+            st.session_state.admin_active_tab = q_tab
+        elif saved_tab in tabs:
+            st.session_state.admin_active_tab = saved_tab
+        else:
+            st.session_state.admin_active_tab = tabs[0]
+        st.session_state.last_tab_param = st.session_state.admin_active_tab
+    
+    # Sync from URL if it changed externally (e.g. browser back button)
+    if q_tab and q_tab in tabs and q_tab != st.session_state.get("last_tab_param"):
+        st.session_state.admin_active_tab = q_tab
+        st.session_state.last_tab_param = q_tab
+        # Also sync filters from URL if we just switched tab via URL
+        if "human" in st.query_params:
+            st.session_state.filter_human = st.query_params.get_all("human")
+        if "top5" in st.query_params:
+            st.session_state.filter_top5 = st.query_params.get_all("top5")
 
-    # Use pills or radio for navigation (pills are nicer in 1.54)
-    # But for compatibility let's use radio horizontal if pills not available, 
-    # or just use radio. 
-    # Streamlit 1.40+ has st.pills. We are on 1.54.
     selected_tab = st.pills(
         "Навигация",
         options=tabs,
@@ -482,11 +769,16 @@ def main():
         label_visibility="collapsed"
     )
     
-    # If pills returns None (e.g. at start), default to first
-    if not selected_tab:
-        selected_tab = tabs[0]
-        st.session_state.admin_active_tab = selected_tab
-
+    # Update persistent state
+    if selected_tab:
+        if selected_tab != saved_tab:
+            cookie_manager.set("admin_active_tab", selected_tab, expires_at=datetime.now() + timedelta(days=30))
+        
+        # Keep URL in sync
+        if st.query_params.get("tab") != selected_tab:
+            st.query_params["tab"] = selected_tab
+            st.session_state.last_tab_param = selected_tab
+    
     st.divider()
 
     if selected_tab == "📊 Обзор":
@@ -497,6 +789,9 @@ def main():
     
     elif selected_tab == "🎯 Качество":
         show_intent_quality(stats_service)
+    
+    elif selected_tab == "📝 Тексты":
+        show_text_overview(stats_service)
     
     elif selected_tab == "📈 Кластеры":
         show_cluster_progress(stats_service)
