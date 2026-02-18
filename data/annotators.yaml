@@ -4,42 +4,42 @@ annotators:
     password: jfkasn2
     cluster: 
       # - card_products_rus
-      # - credits_rus
+      - credits_rus
       # - general_rus
       # - mobile_app_support_rus
       - money_transfers_rus
       - restrictions_rus
-      - social_rus
+      # - social_rus
   - name: madina
     languge: Казахский
     password: knvws1
     cluster: 
       - card_products_rus
-      - credits_rus
+      # - credits_rus
       - general_rus
       - mobile_app_support_rus
       # - money_transfers_rus
       # - restrictions_rus
-      # - social_rus
+      - social_rus
   - name: roma
     languge: Русский
     password: vnbhb4
     cluster: 
       - card_products_rus
-      - credits_rus
+      # - credits_rus
       - general_rus
       - mobile_app_support_rus
       # - money_transfers_rus
       # - restrictions_rus
-      # - social_rus
+      - social_rus
   - name: iskander
     languge: Русский
     password: mokensvjb1
     cluster: 
       # - card_products_rus
-      # - credits_rus
+      - credits_rus
       # - general_rus
       # - mobile_app_support_rus
       - money_transfers_rus
       - restrictions_rus
-      - social_rus
+      # - social_rus
