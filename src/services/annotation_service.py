@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Optional, Tuple
 
+import streamlit as st
 from src.models.annotator import Annotator
 from src.models.candidate import Candidate
 from src.models.text import Text
@@ -141,22 +142,14 @@ class AnnotationService:
             language=language
         )
 
+    @st.cache_data
     def get_all_texts(
         self,
         annotator: str,
         clusters: Optional[List[str]] = None,
         language: Optional[str] = None
     ) -> List[dict]:
-        """Get all texts for navigation.
-        
-        Args:
-            annotator: Annotator name
-            clusters: Filter by clusters
-            language: Filter by language
-            
-        Returns:
-            List of dicts with id, request_text, is_annotated
-        """
+        """Get all texts for navigation (cached)."""
         return self.text_repo.get_all_texts_for_annotator(
             annotator=annotator,
             clusters=clusters,

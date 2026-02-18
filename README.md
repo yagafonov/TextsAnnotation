@@ -113,24 +113,17 @@ annotators:
 
 ## 📊 Features
 
-### Annotation Interface
-
-- **Smart Login**: Dropdown selection of annotators from config
-- **Progress Tracking**: Real-time progress display
-- **Top-K Predictions**: ML model candidate suggestions
-- **Skip/Unskip**: Flexible workflow management
-- **Cluster Filtering**: See only relevant intents
-
-### Admin Dashboard
-
-Accessible at `/admin` with password authentication:
-
-- **📊 Overview**: Total texts, annotators, annotations
-- **👥 Annotator Stats**: Per-annotator performance metrics
-- **🎯 Quality Metrics**: Intent precision, recall, and miss rate
-- **📈 Cluster Progress**: Progress visualization by cluster
-- **⚠️ Disagreements**: Identify annotation conflicts
-- **💾 Export**: CSV export of all annotations
+### Performance & UX
+- **🚀 Instant Imports**: Optimized CSV duplicate checks with database indexing, speeding up session starts by over 10x.
+- **⚡ High-Performance Navigation**: Replaced large selectboxes with a performant "Jump to ID" input for handling thousands of texts without lag.
+- **⌨️ Keyboard Shortcuts**:
+    - `Enter`: Save annotation and load next text.
+    - `Space`: Toggle focused intent checkbox (without page scrolling).
+    - `Arrows`: Navigate smoothly between intent checkboxes.
+- **🎯 Smart Focus**: 
+    - Automatic focus on the first intent upon login and new text open.
+    - Focus persistence during content re-renders (checks/unchecks).
+- **💾 Session Persistence**: Seamless reconnect/reload support using URL query parameters for username.
 
 ## 🗄️ Database Schema
 

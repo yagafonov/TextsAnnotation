@@ -129,14 +129,25 @@ def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
     if "authenticated_user" not in st.session_state:
         st.session_state.authenticated_user = None
     
-    # Check cookie if not authenticated
+    # Check query params if not authenticated
+    if not st.session_state.authenticated_user:
+        q_user = st.query_params.get("user")
+        if q_user:
+            user = auth_service.get_annotator(q_user)
+            if user:
+                st.session_state.authenticated_user = user
+                logger.info(f"Restored session from URL for user: {user.name}")
+    
+    # Check cookie if still not authenticated
     if not st.session_state.authenticated_user:
         cookie_user = cookie_manager.get("annotator_user")
         if cookie_user:
             user = auth_service.get_annotator(cookie_user)
             if user:
                 st.session_state.authenticated_user = user
-                logger.info(f"Restored session for user: {user.name}")
+                # Sync back to URL
+                st.query_params["user"] = user.name
+                logger.info(f"Restored session from cookie for user: {user.name}")
     
     if st.session_state.authenticated_user:
         return st.session_state.authenticated_user
@@ -166,8 +177,9 @@ def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
                 annotator = auth_service.authenticate(username, password)
                 if annotator:
                     st.session_state.authenticated_user = annotator
-                    # Set cookie for 30 days
+                    # Set cookie and query param
                     cookie_manager.set("annotator_user", annotator.name, expires_at=datetime.now() + timedelta(days=30))
+                    st.query_params["user"] = annotator.name
                     st.success(f"✅ Добро пожаловать, {annotator.name}!")
                     st.rerun()
                 else:
@@ -217,6 +229,7 @@ def show_annotation_interface(
         if st.button("🚪 Выйти"):
             st.session_state.authenticated_user = None
             cookie_manager.delete("annotator_user")
+            st.query_params.clear()
             st.rerun()
         
         st.divider()
@@ -361,20 +374,6 @@ def show_annotation_interface(
         st.info("Выберите хотя бы один фильтр слева или измените параметры")
         return
 
-    # Create options list for selectbox
-    # Format: "ID: [Status] Text..."
-    nav_options = []
-    for t in filtered_texts:
-        if t["is_skipped"]:
-            status = "⏭️"
-        elif t["is_annotated"]:
-            status = "✅"
-        else:
-            status = "⬜️"
-            
-        text_preview = t["request_text"][:30] + "..." if len(t["request_text"]) > 30 else t["request_text"]
-        nav_options.append(f"{t['id']}: {status} {text_preview}")
-    
     # Determine safe index in FILTERED list
     current_filtered_index = 0
     # current_real_id is already known
@@ -384,23 +383,29 @@ def show_annotation_interface(
             current_filtered_index = idx
             break
     
-    selected_nav = st.sidebar.selectbox(
-        "Перейти к тексту:",
-        options=nav_options,
-        index=current_filtered_index,
-        key="nav_selectbox"
-    )
-    
-    # Update global index based on selection
-    # Need to handle case where selection triggers rerun
-    # But scroll should only happen on Save/Skip
-    
-    selected_filtered_index = nav_options.index(selected_nav)
-    original_index = text_to_original_index[selected_filtered_index]
-    
-    if original_index != st.session_state.current_text_index:
-        st.session_state.current_text_index = original_index
-        # st.rerun() # Removed as per instruction
+    # NAVIGATION OPTIMIZATION: Replace massive selectbox with compact ID input
+    st.sidebar.write("---")
+    col_nav_1, col_nav_2 = st.sidebar.columns([3, 1])
+    with col_nav_1:
+        jump_id = st.number_input(
+            "Перейти к ID:",
+            min_value=min(t["id"] for t in all_texts),
+            max_value=max(t["id"] for t in all_texts),
+            value=current_real_id,
+            key="jump_id_input"
+        )
+    with col_nav_2:
+        st.write("") # Padding
+        st.write("") # Padding
+        if st.button("GO", key="jump_id_btn"):
+            # Find closest index
+            for idx, t in enumerate(all_texts):
+                if t["id"] >= jump_id:
+                    st.session_state.current_text_index = idx
+                    st.rerun()
+                    break
+
+    st.sidebar.info(f"Текст ID: {current_real_id} ({current_filtered_index + 1} из {len(filtered_texts)} отфильтрованных)")
 
     # Get current text
     current_text = all_texts[st.session_state.current_text_index]
@@ -467,23 +472,100 @@ def show_annotation_interface(
     # Collect decisions
     st.subheader("Выберите подходящие интенты:")
     
-    # Inject JS for arrow key navigation
-    # This script finds all checkboxes and adds keyboard navigation
-    js_script = """
+    # Inject JS for arrow key navigation, auto-focus, and Enter to Save
+    js_script = f"""
     <script>
-    const checkboxes = Array.from(window.parent.document.querySelectorAll('div[data-testid="stCheckbox"] input'));
-    checkboxes.forEach((cb, index) => {
-        cb.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-                const next = checkboxes[index + 1];
-                if (next) next.focus();
-            }
-            if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-                const prev = checkboxes[index - 1];
-                if (prev) prev.focus();
-            }
-        });
-    });
+    (function() {{
+        const pWin = window.parent;
+        const pDoc = pWin.document;
+        const currentTextId = "{text_id}";
+        
+        // --- UTILS ---
+        const getCBs = () => {{
+            return Array.from(pDoc.querySelectorAll('div[data-testid="stCheckbox"] input'))
+                        .filter(cb => !cb.closest('[data-testid="stSidebar"]'));
+        }};
+
+        const focusCB = (index) => {{
+            const cbs = getCBs();
+            if (cbs[index]) {{
+                cbs[index].focus();
+                pWin._lastFocusedIndex = index;
+            }}
+        }};
+
+        // --- RESET ON NEW TEXT ---
+        if (pWin._lastTextId !== currentTextId) {{
+            pWin._lastFocusedIndex = 0;
+            pWin._lastTextId = currentTextId;
+        }}
+
+        // --- HANDLER ---
+        const shortcutHandler = (e) => {{
+            const active = pDoc.activeElement;
+            const isInput = active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && active.type !== 'checkbox');
+            
+            // 1. Space bar (Global scroll prevention)
+            if ((e.key === ' ' || e.code === 'Space') && !isInput) {{
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (active.type === 'checkbox') {{
+                    active.click();
+                }}
+                return false;
+            }}
+
+            // 2. Enter key
+            if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {{
+                if (!isInput && active.tagName !== 'BUTTON') {{
+                    const btn = pDoc.querySelector('button[kind="primary"]');
+                    if (btn) {{
+                        e.preventDefault();
+                        e.stopImmediatePropagation();
+                        btn.click();
+                    }}
+                }}
+            }}
+
+            // 3. Arrow Keys
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {{
+                if (active.type === 'checkbox') {{
+                    const cbs = getCBs();
+                    const idx = cbs.indexOf(active);
+                    if (idx !== -1) {{
+                        let nextIdx = idx;
+                        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') nextIdx++;
+                        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') nextIdx--;
+                        
+                        if (nextIdx >= 0 && nextIdx < cbs.length) {{
+                            e.preventDefault();
+                            e.stopImmediatePropagation();
+                            focusCB(nextIdx);
+                        }}
+                    }}
+                }}
+            }}
+        }};
+
+        // --- ATTACH ---
+        if (pWin._shortcutHandler) {{
+            pWin.removeEventListener('keydown', pWin._shortcutHandler, true);
+        }}
+        pWin._shortcutHandler = shortcutHandler;
+        pWin.addEventListener('keydown', shortcutHandler, true);
+
+        // --- INITIAL FOCUS ---
+        const startFocus = () => {{
+            const active = pDoc.activeElement;
+            const alreadyFocused = active && active.closest('div[data-testid="stCheckbox"]');
+            if (!alreadyFocused) {{
+                const targetIdx = pWin._lastFocusedIndex || 0;
+                focusCB(targetIdx);
+            }}
+        }};
+
+        [100, 300, 600, 1000].forEach(delay => setTimeout(startFocus, delay));
+    }})();
     </script>
     """
     components.html(js_script, height=0, width=0)
@@ -592,6 +674,8 @@ def show_annotation_interface(
         if show_skipped and st.button("🔄 Вернуть в работу", width="stretch"):
             annotation_service.unskip_text(text_id, annotator.name)
             st.info("Текст возвращён в работу")
+            # Clear cache to reflect status update in navigation
+            annotation_service.get_all_texts.clear()
             st.rerun()
 
 

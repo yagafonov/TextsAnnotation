@@ -124,6 +124,21 @@ def stop_auto_dump() -> None:
     logger.info("Auto-dump stopped")
 
 
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, column_type: str) -> bool:
+    """Ensure a column exists in a table.
+    
+    Returns:
+        True if column was added, False if it already existed.
+    """
+    cursor = conn.execute(f"PRAGMA table_info({table})")
+    columns = [row["name"] for row in cursor.fetchall()]
+    if column not in columns:
+        logger.info(f"Adding missing column '{column}' to table '{table}'")
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+        return True
+    return False
+
+
 def init_database(db_path: str) -> None:
     """Initialize database schema with all tables and indexes.
     
@@ -235,8 +250,32 @@ def init_database(db_path: str) -> None:
             ON shown_intents (text_id, annotator, label)
         """)
         
+        # Schema Migrations (Compatibility with legacy dumps)
+        logger.info("Checking for schema migrations")
+        migration_applied = False
+        try:
+            # Table 'texts' migrations
+            if ensure_column(conn, "texts", "assigned_cluster", "TEXT"): migration_applied = True
+            if ensure_column(conn, "texts", "language", "TEXT"): migration_applied = True
+            if ensure_column(conn, "texts", "assigned_to", "TEXT"): migration_applied = True
+            
+            if migration_applied:
+                logger.info("Schema migration applied. Incrementing data version.")
+                current_v_row = conn.execute("SELECT value FROM settings WHERE key = 'current_data_version'").fetchone()
+                current_v = int(current_v_row["value"]) if current_v_row else 0
+                new_v = current_v + 1
+                conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                    ("current_data_version", str(new_v))
+                )
+        except Exception as e:
+            logger.critical(f"DATABASE MIGRATION FAILED: {e}")
+            raise RuntimeError(f"Database migration failed. Manual intervention may be required: {e}")
+
         # Performance indexes
         logger.info("Creating performance indexes")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_texts_text ON texts(text)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_texts_assigned_to ON texts(assigned_to)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_texts_assigned_cluster ON texts(assigned_cluster)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_texts_language ON texts(language)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_annotations_text_id ON annotations(text_id)")
@@ -245,7 +284,8 @@ def init_database(db_path: str) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_candidates_text_id ON candidates(text_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_candidates_text_rank ON candidates(text_id, rank)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_skipped_annotator ON skipped_texts(annotator)")
-        
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_shown_intents_lookup ON shown_intents(text_id, annotator)")
+
         # Initialize default data
         if not conn.execute("SELECT 1 FROM model_versions LIMIT 1").fetchone():
             logger.info("Initializing default model version")
