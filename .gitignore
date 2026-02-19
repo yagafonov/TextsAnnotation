@@ -12,3 +12,4 @@ logs
 .DS_Store
 data/uploads
 exports
+data/nlu_records_20260127_filtered_selected.csv
