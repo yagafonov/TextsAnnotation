@@ -217,7 +217,17 @@ def show_annotation_interface(
     # Sidebar
     with st.sidebar:
         st.write(f"**Пользователь:** {annotator.name}")
-        st.write(f"**Язык:** {annotator.language}")
+        
+        # Language mapping
+        LANGUAGES = {
+            "ru": "Русский",
+            "en": "English",
+            "kk": "Казахский",
+            "uz": "Uzbek",
+            "check": "Проверка"
+        }
+        lang_name = LANGUAGES.get(annotator.language, annotator.language)
+        st.write(f"**Язык:** {lang_name}")
         
         st.write("**Кластеры:**")
         if annotator.clusters:
@@ -608,8 +618,12 @@ def show_annotation_interface(
         )
         
         if intent.description:
-            st.caption(f"└─ {intent.description}")
-            
+            with st.expander(f"ℹ️ {intent.label}", expanded=False):
+                st.markdown(f"**Описание:** {intent.description}")
+                if intent.train:
+                    st.markdown("**Примеры:**")
+                    for example in intent.train[:3]:  # Show top 3 examples
+                        st.markdown(f"- _{example}_")
         decisions[candidate.label] = "yes" if decision else "no"
         shown_intents_source[candidate.label] = "candidate"
         st.write("") # Add spacing
@@ -687,13 +701,10 @@ def show_annotation_interface(
             st.session_state.scroll_to_top = True
             st.rerun()
     
+    
     with col3:
-        if show_skipped and st.button("🔄 Вернуть в работу", width="stretch"):
-            annotation_service.unskip_text(text_id, annotator.name)
-            st.info("Текст возвращён в работу")
-            # Clear cache to reflect status update in navigation
-            annotation_service.get_all_texts.clear()
-            st.rerun()
+        if show_skipped:
+            st.info("Текст пропущен")
 
 
 @st.cache_resource
