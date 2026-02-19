@@ -16,7 +16,7 @@ import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(Path(__file__).parent / ".env", override=True)
 
 # Import new architecture components
 from src.models.annotator import Annotator
