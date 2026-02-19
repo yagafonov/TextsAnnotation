@@ -131,7 +131,7 @@ def show_activity_stats(stats_service: StatsService):
     daily = stats_service.get_daily_activity()
     if not daily.empty:
         chart = alt.Chart(daily).mark_bar().encode(
-            x=alt.X('date:O', axis=alt.Axis(labelAngle=-90, title='Дата')),
+            x=alt.X('date:O', axis=alt.Axis(labelAngle=0, title='Дата')),
             y=alt.Y('count:Q', title='Количество'),
             color=alt.Color('annotator:N', title='Аннотатор'),
             tooltip=['date', 'annotator', 'count']
@@ -159,7 +159,7 @@ def show_activity_stats(stats_service: StatsService):
             # To ensure we show the breakdown by annotator, we use the original 'hourly_filtered'
             
             chart = alt.Chart(hourly_filtered).mark_bar().encode(
-                x=alt.X('hour:O', axis=alt.Axis(labelAngle=-90, title='Час')),
+                x=alt.X('hour:O', axis=alt.Axis(labelAngle=0, title='Час')),
                 y=alt.Y('count:Q', title='Количество'),
                 color=alt.Color('annotator:N', title='Аннотатор'),
                 tooltip=['hour', 'annotator', 'count']
@@ -538,7 +538,7 @@ def show_cluster_progress(stats_service: StatsService):
         # Visualize progress
         # Visualize progress
         chart = alt.Chart(df).mark_bar().encode(
-            x=alt.X('cluster:N', axis=alt.Axis(labelAngle=-90, title='Кластер')),
+            x=alt.X('cluster:N', axis=alt.Axis(labelAngle=0, title='Кластер')),
             y=alt.Y('annotated_texts:Q', title='Размечено'),
             tooltip=['cluster', 'total_texts', 'annotated_texts', 'completion_rate']
         ).interactive()
