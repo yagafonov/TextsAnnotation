@@ -5,6 +5,7 @@ Uses the new modular architecture with services and repositories.
 """
 
 import os
+import html
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -485,7 +486,15 @@ def show_annotation_interface(
     
     # Display text
     st.subheader("Текст для разметки:")
-    st.info(text_content)
+    # st.info(text_content) replaced with custom markdown to fit content width
+    st.markdown(
+        f"""
+        <div style="background-color: #e6f3ff; color: #004085; padding: 1rem; border-radius: 0.5rem; border: 1px solid #b8daff; width: fit-content; max_width: 100%; margin-bottom: 1rem;">
+            {html.escape(text_content)}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     
     # Get candidates
     text_obj, candidates = annotation_service.get_text_with_candidates(text_id)
