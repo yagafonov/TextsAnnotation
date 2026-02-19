@@ -14,6 +14,8 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 
 from src.repositories.intent_repo import IntentRepository
+from src.services.annotation_service import AnnotationService
+from src.services.auth_service import AuthService
 from src.services.import_service import ImportService
 from src.services.stats_service import StatsService
 from src.utils.config import settings
@@ -795,10 +797,15 @@ def show_import_section():
                         # Load intents
                         intent_repo = IntentRepository(settings.db_path)
                         intents = intent_repo.load_from_yaml(settings.intents_path)
-                        
+
+                        # Load annotators for assignment
+                        auth_service = AuthService(settings.annotators_path)
+                        annotators = auth_service.load_annotators().annotators
+                        annotation_service = AnnotationService(settings.db_path)
+
                         # Import from CSV
                         import_service = ImportService(settings.db_path)
-                        
+
                         # Track detailed stats
                         total_rows = len(df)
                         imported_count = import_service.import_from_csv(
@@ -806,7 +813,10 @@ def show_import_section():
                             intents=intents,
                             top_k=settings.top_k,
                             model_version=model_version,
-                            data_version=data_version
+                            data_version=data_version,
+                            probability_threshold=settings.probability_threshold,
+                            annotators=annotators,
+                            annotation_service=annotation_service
                         )
                         
                         skipped_count = total_rows - imported_count
