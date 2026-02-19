@@ -644,7 +644,7 @@ def show_annotation_interface(
     # Custom formatter with bold intent names
     def format_intent_option(label):
         intent = intents.get(label)
-        desc = f" - {intent.description}" if intent and intent.description else ""
+        desc = f" | {intent.description}" if intent and intent.description else ""
         return f"{to_bold(label)}{desc}"
 
     extra_labels = st.multiselect(
