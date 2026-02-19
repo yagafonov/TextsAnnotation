@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import altair as alt
 import extra_streamlit_components as stx
 import pandas as pd
 import streamlit as st
@@ -129,8 +130,13 @@ def show_activity_stats(stats_service: StatsService):
     st.subheader("Активность по дням")
     daily = stats_service.get_daily_activity()
     if not daily.empty:
-        pivot = daily.pivot(index="date", columns="annotator", values="count").fillna(0)
-        st.bar_chart(pivot)
+        chart = alt.Chart(daily).mark_bar().encode(
+            x=alt.X('date:O', axis=alt.Axis(labelAngle=-90, title='Дата')),
+            y=alt.Y('count:Q', title='Количество'),
+            color=alt.Color('annotator:N', title='Аннотатор'),
+            tooltip=['date', 'annotator', 'count']
+        ).interactive()
+        st.altair_chart(chart, use_container_width=True)
     
     # Hourly Activity
     st.subheader("Активность по часам")
@@ -148,12 +154,17 @@ def show_activity_stats(stats_service: StatsService):
         if not hourly_filtered.empty:
             # Create pivot: hours as index, annotators as columns
             hourly_pivot = hourly_filtered.pivot(index="hour", columns="annotator", values="count").fillna(0)
-            # Ensure all hours 0-23 are present
-            all_hours = pd.DataFrame(index=range(24))
-            hourly_pivot = all_hours.join(hourly_pivot).fillna(0)
-            hourly_pivot.index.name = "Час"
-
-            st.bar_chart(hourly_pivot)
+            
+            # Use Melted data for Altair to handle stacked bars easily or just use the filtered data directly
+            # To ensure we show the breakdown by annotator, we use the original 'hourly_filtered'
+            
+            chart = alt.Chart(hourly_filtered).mark_bar().encode(
+                x=alt.X('hour:O', axis=alt.Axis(labelAngle=-90, title='Час')),
+                y=alt.Y('count:Q', title='Количество'),
+                color=alt.Color('annotator:N', title='Аннотатор'),
+                tooltip=['hour', 'annotator', 'count']
+            ).interactive()
+            st.altair_chart(chart, use_container_width=True)
             
             # Summary table
             summary = hourly_filtered.groupby("annotator").agg(
@@ -525,7 +536,13 @@ def show_cluster_progress(stats_service: StatsService):
         )
         
         # Visualize progress
-        st.bar_chart(df.set_index('cluster')['annotated_texts'])
+        # Visualize progress
+        chart = alt.Chart(df).mark_bar().encode(
+            x=alt.X('cluster:N', axis=alt.Axis(labelAngle=-90, title='Кластер')),
+            y=alt.Y('annotated_texts:Q', title='Размечено'),
+            tooltip=['cluster', 'total_texts', 'annotated_texts', 'completion_rate']
+        ).interactive()
+        st.altair_chart(chart, use_container_width=True)
     else:
         st.info("Нет данных о кластерах")
 
