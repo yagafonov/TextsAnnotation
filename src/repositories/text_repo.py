@@ -316,4 +316,5 @@ class TextRepository(BaseRepository):
             where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
             query = f"{base_query} {where_clause} ORDER BY t.id ASC"
             
-            return conn.execute(query, params).fetchall()
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
