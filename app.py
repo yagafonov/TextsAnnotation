@@ -253,16 +253,28 @@ def show_annotation_interface(
         # Show skipped toggle
         show_skipped = st.checkbox("🔄 Показать пропущенные", value=False)
     
+    # Search functionality
+    search_query = st.text_input("🔍 Поиск", placeholder="Введите текст...", key="nav_search").strip().lower()
+
     # Get all texts for navigation
-    all_texts = annotation_service.get_all_texts(
+    all_texts_raw = annotation_service.get_all_texts(
         annotator=annotator.name,
         clusters=annotator.clusters if annotator.clusters else None,
         language=annotator.language
     )
     
+    # Filter texts
+    if search_query:
+        all_texts = [t for t in all_texts_raw if search_query in t["request_text"].lower()]
+    else:
+        all_texts = all_texts_raw
+        
     if not all_texts:
-        st.success("🎉 Нет текстов для разметки!")
-        st.balloons()
+        if search_query:
+            st.warning(f"Тексты не найдены по запросу: '{search_query}'")
+        else:
+            st.success("🎉 Нет текстов для разметки!")
+            st.balloons()
         return
 
     # Initialize session state for current index
@@ -275,6 +287,45 @@ def show_annotation_interface(
         else:
             st.session_state.current_text_index = 0
 
+    current_idx_in_filtered = -1
+    
+    # If we have a saved index (global ID based), try to find it in filtered list
+    # Actually current_text_index is likely index in all_texts, which changes if we filter.
+    # Needs to be careful. usage of current_text_index in this app seems to be positional index.
+    # If we filter, positional index 0 is different text.
+    # We should probably track by ID if possible, but the app uses index.
+    # Let's check how current_text is retrieved. 
+    # line 348: text_data = all_texts[st.session_state.current_text_index]
+    
+    # So if we filter, we must reset index or find the text in the new list.
+    # Simplest approach: When search changes, reset to 0.
+    
+    # But wait, navigation uses selectbox below.
+    
+    # Let's map display names to indices in the FILTERED list
+    text_options = [f"{t['id']}: {t['request_text'][:50]}..." for t in all_texts]
+    
+    # Current selection logic
+    # If current_text_index is out of bounds of filtered list, reset to 0
+    if st.session_state.current_text_index >= len(all_texts):
+        st.session_state.current_text_index = 0
+        
+    selected_text_idx = st.selectbox(
+        "Навигация",
+        options=range(len(all_texts)),
+        format_func=lambda i: text_options[i],
+        index=st.session_state.current_text_index,
+        key="nav_selectbox"
+    )
+    
+    # Sync selection
+    if selected_text_idx != st.session_state.current_text_index:
+        st.session_state.current_text_index = selected_text_idx
+        st.rerun()
+
+    # Logic to handle "Next" / "Prev" buttons needs to respect the filtered list
+    # They update st.session_state.current_text_index
+    # Since we use all_texts (filtered) everywhere below, it should work fine.
     # Ensure index is within bounds (e.g. after filter change)
     if st.session_state.current_text_index >= len(all_texts):
         st.session_state.current_text_index = 0
