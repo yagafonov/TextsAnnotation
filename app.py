@@ -618,12 +618,10 @@ def show_annotation_interface(
         )
         
         if intent.description:
-            with st.expander(f"ℹ️ {intent.label}", expanded=False):
-                st.markdown(f"**Описание:** {intent.description}")
-                if intent.train:
-                    st.markdown("**Примеры:**")
-                    for example in intent.train[:3]:  # Show top 3 examples
-                        st.markdown(f"- _{example}_")
+            st.caption(f"**Описание:** {intent.description}")
+            if intent.train:
+                examples = " | ".join(intent.train[:5])
+                st.caption(f"**Примеры:** {examples}")
         decisions[candidate.label] = "yes" if decision else "no"
         shown_intents_source[candidate.label] = "candidate"
         st.write("") # Add spacing
