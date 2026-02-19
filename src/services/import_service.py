@@ -2,9 +2,10 @@
 
 import csv
 import os
-from typing import Dict
+from typing import Dict, List, Optional
 
 from modeling import TopKModelStub
+from src.models.candidate import Candidate
 from src.models.intent import Intent
 from src.repositories.text_repo import TextRepository
 from src.utils.logger import logger
@@ -28,6 +29,7 @@ class ImportService:
         top_k: int,
         model_version: int,
         data_version: int,
+        probability_threshold: float = 0.0,
         annotators: list = None,
         annotation_service = None
     ) -> int:
@@ -58,14 +60,22 @@ class ImportService:
                 
                 for row in reader:
                     text = row.get("request_text", "").strip()
-                    if not text or self.text_repo.exists(text):
+                    print(f"DEBUG IMPORT: text='{text}', keys={row.keys()}")
+                    if not text:
+                        print("DEBUG IMPORT: Missing text")
+                        continue
+                    if self.text_repo.exists(text):
+                        print("DEBUG IMPORT: Text exists")
                         continue
                     
                     language = self._normalize_language(row.get("language"))
                     clusters = row.get("clusters")
                     
-                    # Generate candidates first
-                    candidates = model.predict(text)
+                    # Generate candidates: read from CSV score columns if present,
+                    # otherwise fall back to model stub
+                    candidates = self._candidates_from_row(row, intents, probability_threshold)
+                    if candidates is None:
+                        candidates = model.predict(text)
                     
                     # Determine assigned cluster from scores or clusters field
                     assigned_cluster = self._determine_cluster(row, intents)
@@ -102,6 +112,36 @@ class ImportService:
             logger.error(f"Failed to import from CSV: {e}")
             raise
     
+    def _candidates_from_row(
+        self,
+        row: dict,
+        intents: Dict[str, Intent],
+        probability_threshold: float
+    ) -> Optional[List[Candidate]]:
+        """Extract candidates from CSV row using intent-label column names.
+
+        Returns None if no intent-label columns are found in the row,
+        which signals the caller to fall back to the model stub.
+        """
+        scores = []
+        for label in intents:
+            if label in row:
+                try:
+                    prob = float(row[label])
+                    if prob >= probability_threshold:
+                        scores.append((label, prob))
+                except (ValueError, TypeError):
+                    continue
+
+        if not scores:
+            return None
+
+        scores.sort(key=lambda x: x[1], reverse=True)
+        return [
+            Candidate(label=label, rank=idx + 1, probability=prob)
+            for idx, (label, prob) in enumerate(scores)
+        ]
+
     def _determine_cluster(self, row: Dict[str, str], intents: Dict[str, Intent]) -> str:
         """Determine cluster from CSV row.
         

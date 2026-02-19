@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     top_k: int = Field(default=5, env="TEXTS_TOP_K", gt=0, le=20)
     margin_threshold: float = Field(default=0.1, env="TEXTS_MARGIN_THRESHOLD", ge=0, le=1)
     probability_threshold: float = Field(default=0.1, env="TEXTS_PROBABILITY_THRESHOLD", ge=0, le=1)
-    min_annotators: int = Field(default=1, env="TEXTS_MIN_ANNOTATORS", gt=0)
+    annotators_intents_confidence_threshold: float = Field(default=0.4, env="ANNOTATORS_INTENTS_CONFIDENCE_THRESHOLD", ge=0, le=1)
+
     
     # Paths
     intents_path: str = Field(default="data/intents", env="TEXTS_INTENTS_PATH")

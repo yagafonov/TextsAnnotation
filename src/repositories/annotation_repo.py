@@ -142,6 +142,7 @@ class AnnotationRepository(BaseRepository):
         self,
         annotator: str,
         clusters: Optional[List[str]] = None,
+        intents: Optional[List[str]] = None,
         language: Optional[str] = None
     ) -> dict:
         """Get annotation progress for an annotator.
@@ -149,6 +150,7 @@ class AnnotationRepository(BaseRepository):
         Args:
             annotator: Annotator name
             clusters: Filter by clusters
+            intents: Filter by intents
             language: Filter by language
             
         Returns:
@@ -163,6 +165,11 @@ class AnnotationRepository(BaseRepository):
                 placeholders = ", ".join("?" for _ in clusters)
                 total_query += f" AND t.assigned_cluster IN ({placeholders})"
                 total_params.extend(clusters)
+            
+            if intents:
+                placeholders = ", ".join("?" for _ in intents)
+                total_query += f" AND EXISTS (SELECT 1 FROM candidates c WHERE c.text_id = t.id AND c.label IN ({placeholders}))"
+                total_params.extend(intents)
             
             if language:
                 total_query += " AND (t.language = ? OR t.language IS NULL)"
@@ -183,6 +190,11 @@ class AnnotationRepository(BaseRepository):
                 placeholders = ", ".join("?" for _ in clusters)
                 done_query += f" AND t.assigned_cluster IN ({placeholders})"
                 done_params.extend(clusters)
+            
+            if intents:
+                placeholders = ", ".join("?" for _ in intents)
+                done_query += f" AND EXISTS (SELECT 1 FROM candidates c WHERE c.text_id = t.id AND c.label IN ({placeholders}))"
+                done_params.extend(intents)
             
             if language:
                 done_query += " AND (t.language = ? OR t.language IS NULL)"

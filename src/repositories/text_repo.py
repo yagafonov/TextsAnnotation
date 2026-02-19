@@ -151,8 +151,8 @@ class TextRepository(BaseRepository):
         self,
         annotator: str,
         clusters: Optional[List[str]] = None,
+        intents: Optional[List[str]] = None,
         language: Optional[str] = None,
-        min_annotators: int = 2,
         show_skipped: bool = False
     ) -> List[dict]:
         """Get texts that need annotation.
@@ -160,8 +160,8 @@ class TextRepository(BaseRepository):
         Args:
             annotator: Annotator name
             clusters: Filter by clusters
+            intents: Filter by intents (candidates)
             language: Filter by language
-            min_annotators: Minimum number of required annotators
             show_skipped: Show only skipped texts
             
         Returns:
@@ -213,10 +213,10 @@ class TextRepository(BaseRepository):
             
             # ASSIGNMENT LOGIC:
             # 1. If assigned_to is set, it MUST match annotator
-            # 2. If assigned_to is NULL, use Cluster/Language logic
+            # 2. If assigned_to is NULL, use Cluster/Language/Intent logic
             
             # Combine into a complex OR clause:
-            # (assigned_to = ? OR (assigned_to IS NULL AND [cluster/lang filters]))
+            # (assigned_to = ? OR (assigned_to IS NULL AND [filters]))
             
             assignment_clause = "(t.assigned_to = ?"
             assignment_params = [annotator]
@@ -228,6 +228,12 @@ class TextRepository(BaseRepository):
                 placeholders = ", ".join("?" for _ in clusters)
                 fallback_filters.append(f"t.assigned_cluster IN ({placeholders})")
                 assignment_params.extend(clusters)
+            
+            # Add intent filter to fallback
+            if intents:
+                placeholders = ", ".join("?" for _ in intents)
+                fallback_filters.append(f"EXISTS (SELECT 1 FROM candidates c WHERE c.text_id = t.id AND c.label IN ({placeholders}))")
+                assignment_params.extend(intents)
             
             # Add language filter to fallback
             if language:
@@ -250,12 +256,13 @@ class TextRepository(BaseRepository):
             where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
             query = f"{base_query} {where_clause} GROUP BY t.id HAVING COUNT(DISTINCT a.annotator) < ? ORDER BY COUNT(DISTINCT a.annotator) DESC, t.assigned_cluster, t.created_at DESC"
             
-            return conn.execute(query, params + [min_annotators]).fetchall()
+            return conn.execute(query, params + [1]).fetchall()
 
     def get_all_texts_for_annotator(
         self,
         annotator: str,
         clusters: Optional[List[str]] = None,
+        intents: Optional[List[str]] = None,
         language: Optional[str] = None
     ) -> List[dict]:
         """Get all texts with status for an annotator.
@@ -263,6 +270,7 @@ class TextRepository(BaseRepository):
         Args:
             annotator: Annotator name
             clusters: Filter by clusters
+            intents: Filter by intents (candidates)
             language: Filter by language
             
         Returns:
@@ -298,6 +306,12 @@ class TextRepository(BaseRepository):
                 placeholders = ", ".join("?" for _ in clusters)
                 fallback_filters.append(f"t.assigned_cluster IN ({placeholders})")
                 assignment_params.extend(clusters)
+            
+            # Add intent filter to fallback
+            if intents:
+                placeholders = ", ".join("?" for _ in intents)
+                fallback_filters.append(f"EXISTS (SELECT 1 FROM candidates c WHERE c.text_id = t.id AND c.label IN ({placeholders}))")
+                assignment_params.extend(intents)
             
             # Add language filter
             if language:

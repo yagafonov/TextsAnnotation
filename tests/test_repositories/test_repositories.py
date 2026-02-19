@@ -80,8 +80,7 @@ class TestTextRepository:
         texts = text_repo.get_unannotated(
             annotator="test_annotator",
             clusters=["cluster1"],
-            language="ru",
-            min_annotators=2
+            language="ru"
         )
         
         assert len(texts) == 3

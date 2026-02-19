@@ -113,6 +113,7 @@ def handle_import(services: dict, intents: Dict[str, Intent]):
         top_k=settings.top_k,
         model_version=current_model_version,
         data_version=current_data_version,
+        probability_threshold=settings.probability_threshold,
         annotators=annotators_config.annotators,
         annotation_service=services["annotation"]
     )
@@ -230,8 +231,35 @@ def show_annotation_interface(
         lang_name = LANGUAGES.get(annotator.language, annotator.language)
         st.write(f"**Язык:** {lang_name}")
         
-        st.write("**Кластеры:**")
-        if annotator.clusters:
+        st.write("**Кластеры/Интенты:**")
+        if annotator.intents:
+            st.write("По интентам:")
+            items_html = []
+            for intent_label in annotator.intents:
+                intent_obj = intents.get(intent_label)
+                desc = intent_obj.description if intent_obj and intent_obj.description else ""
+                label_esc = html.escape(intent_label)
+                if desc:
+                    desc_esc = html.escape(desc)
+                    items_html.append(
+                        f'<li><span class="itip">{label_esc}'
+                        f'<span class="itip-text">{desc_esc}</span></span></li>'
+                    )
+                else:
+                    items_html.append(f"<li>{label_esc}</li>")
+            st.markdown(
+                "<style>"
+                ".itip{position:relative;display:inline-block;border-bottom:1px dotted #888;}"
+                ".itip .itip-text{visibility:hidden;background:#333;color:#fff;padding:4px 8px;"
+                "border-radius:4px;position:absolute;left:0;top:110%;z-index:9999;font-size:12px;"
+                "white-space:pre-wrap;max-width:220px;line-height:1.4;pointer-events:none;}"
+                ".itip:hover .itip-text{visibility:visible;}"
+                "</style>"
+                f"<ul style='margin:0;padding-left:1.2em;list-style-type:disc;'>{''.join(items_html)}</ul>",
+                unsafe_allow_html=True
+            )
+        elif annotator.clusters:
+            st.write("По кластерам:")
             for cluster in annotator.clusters:
                 st.markdown(f"- {cluster}")
         else:
@@ -249,7 +277,8 @@ def show_annotation_interface(
         # Progress
         progress = annotation_service.get_progress(
             annotator=annotator.name,
-            clusters=annotator.clusters if annotator.clusters else None,
+            clusters=annotator.clusters if not annotator.intents and annotator.clusters else None,
+            intents=annotator.intents if annotator.intents else None,
             language=annotator.language
         )
         
@@ -267,7 +296,8 @@ def show_annotation_interface(
     # Get all texts for navigation
     all_texts = annotation_service.get_all_texts(
         annotator=annotator.name,
-        clusters=annotator.clusters if annotator.clusters else None,
+        clusters=annotator.clusters if not annotator.intents and annotator.clusters else None,
+        intents=annotator.intents if annotator.intents else None,
         language=annotator.language
     )
     
@@ -498,16 +528,27 @@ def show_annotation_interface(
     
     # Get candidates
     text_obj, candidates = annotation_service.get_text_with_candidates(text_id)
-    
-    # Filter candidates by cluster
+
+    # Filter candidates by cluster (used for cluster-scoped annotators)
     filtered_candidates = [
         c for c in candidates
         if not annotator.clusters or intents.get(c.label, Intent(label=c.label)).cluster in annotator.clusters
     ]
-    
+
+    # Build shown candidates: top-k by model confidence UNION annotator's intents above threshold
+    threshold = settings.annotators_intents_confidence_threshold
+    shown_map = {}  # label -> (candidate, source)
+    for c in filtered_candidates[:settings.top_k]:
+        shown_map[c.label] = (c, "candidate")
+    if annotator.intents:
+        for c in candidates:
+            if c.label in annotator.intents and c.probability >= threshold and c.label not in shown_map:
+                shown_map[c.label] = (c, "annotator_intent")
+    shown_items = sorted(shown_map.values(), key=lambda x: x[0].probability, reverse=True)
+
     # Collect decisions
     st.subheader("Выберите подходящие интенты:")
-    
+
     # Inject JS for arrow key navigation, auto-focus, and Enter to Save
     js_script = f"""
     <script>
@@ -607,34 +648,31 @@ def show_annotation_interface(
     components.html(js_script, height=0, width=0)
     
     decisions = {}
-    candidate_labels = [c.label for c in filtered_candidates]
+    candidate_labels = list(shown_map.keys())
     shown_intents_source = {}
-    
-    for candidate in filtered_candidates[:settings.top_k]:
+
+    for candidate, source in shown_items:
         intent = intents.get(candidate.label)
         if not intent:
             continue
-        
+
         pct = int(candidate.probability * 100)
-        
-        # Format label
         label_text = f"**{candidate.label}** ({pct}%)"
-        
-        # Remove tooltip/help as requested
+
         decision = st.checkbox(
-            label_text, 
-            key=f"cand_{candidate.label}_{text_id}" # Unique key per text to reset state
+            label_text,
+            key=f"cand_{candidate.label}_{text_id}"
         )
-        
+
         if intent.description:
             st.caption(f"**Описание:** {intent.description}")
             if intent.train:
                 examples = " | ".join(intent.train[:5])
                 st.caption(f"**Примеры:** {examples}")
         decisions[candidate.label] = "yes" if decision else "no"
-        shown_intents_source[candidate.label] = "candidate"
-        st.write("") # Add spacing
-    
+        shown_intents_source[candidate.label] = source
+        st.write("")
+
     # Extra intents
     st.divider()
     available_intents = [label for label, intent in intents.items()

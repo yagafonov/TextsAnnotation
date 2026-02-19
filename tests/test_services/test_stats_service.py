@@ -297,7 +297,7 @@ class TestStatsServiceDisagreements:
         service = StatsService(temp_db)
         
         # Act
-        df = service.get_disagreements(min_annotators=2)
+        df = service.get_disagreements()
         
         # Assert: Empty dataframe
         assert len(df) == 0
@@ -338,7 +338,7 @@ class TestStatsServiceDisagreements:
         service = StatsService(temp_db)
         
         # Act
-        df = service.get_disagreements(min_annotators=2)
+        df = service.get_disagreements()
         
         # Assert: Disagreement detected
         assert len(df) > 0
@@ -374,7 +374,7 @@ class TestStatsServiceDisagreements:
         service = StatsService(temp_db)
         
         # Act
-        df = service.get_disagreements(min_annotators=2)
+        df = service.get_disagreements()
         
         # Assert: No disagreements
         assert len(df) == 0

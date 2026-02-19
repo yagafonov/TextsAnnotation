@@ -11,12 +11,9 @@ from src.utils.logger import logger
 class StatsService(BaseRepository):
     """Service for generating statistics and metrics."""
     
-    def get_overall_stats(self, min_annotators: int = 1) -> pd.DataFrame:
+    def get_overall_stats(self) -> pd.DataFrame:
         """Get overall annotation statistics.
         
-        Args:
-            min_annotators: Minimum annotators to consider text as annotated
-            
         Returns:
             DataFrame with overall stats
         """
@@ -44,7 +41,7 @@ class StatsService(BaseRepository):
         """
         
         with get_connection(self.db_path) as conn:
-            return pd.read_sql_query(query, conn, params=(min_annotators,))
+            return pd.read_sql_query(query, conn, params=(1,))
     
     def get_daily_activity(self) -> pd.DataFrame:
         """Get annotation activity by day.
@@ -191,6 +188,113 @@ class StatsService(BaseRepository):
         
         with get_connection(self.db_path) as conn:
             return pd.read_sql_query(query, conn)
+
+    def get_model_quality_legacy(self) -> pd.DataFrame:
+        """Get per-intent model quality metrics (legacy logic).
+        
+        Returns:
+            DataFrame with intent quality metrics:
+            - top1_precision
+            - missed_rate
+            - top1_count, top1_yes, top1_no
+            - potential_count, missed_opportunity_count
+        """
+        with get_connection(self.db_path) as conn:
+            # Get top-1 precision per intent
+            top1_stats = conn.execute(
+                """
+                SELECT
+                    c.label,
+                    COUNT(DISTINCT c.text_id || '-' || a.annotator) as top1_count,
+                    SUM(CASE WHEN a.decision = 'yes' THEN 1 ELSE 0 END) as top1_yes,
+                    SUM(CASE WHEN a.decision = 'no' THEN 1 ELSE 0 END) as top1_no
+                FROM candidates c
+                JOIN annotations a ON a.text_id = c.text_id AND a.label = c.label
+                WHERE c.rank = 1
+                GROUP BY c.label
+                """
+            ).fetchall()
+
+            # Get missed opportunities: intent is rank 2-N, top1 is no, this intent is yes
+            missed_stats = conn.execute(
+                """
+                SELECT
+                    c_other.label,
+                    COUNT(*) as missed_opportunity_count
+                FROM candidates c_top1
+                JOIN candidates c_other ON c_other.text_id = c_top1.text_id
+                    AND c_other.rank > 1
+                JOIN annotations a_top1 ON a_top1.text_id = c_top1.text_id
+                    AND a_top1.label = c_top1.label
+                JOIN annotations a_other ON a_other.text_id = c_other.text_id
+                    AND a_other.label = c_other.label
+                    AND a_other.annotator = a_top1.annotator
+                WHERE c_top1.rank = 1
+                    AND a_top1.decision = 'no'
+                    AND a_other.decision = 'yes'
+                GROUP BY c_other.label
+                """
+            ).fetchall()
+
+            # Get total times each intent appeared in rank 2-N when top1 was rejected
+            potential_missed = conn.execute(
+                """
+                SELECT
+                    c_other.label,
+                    COUNT(DISTINCT c_other.text_id || '-' || a_top1.annotator) as potential_count
+                FROM candidates c_top1
+                JOIN candidates c_other ON c_other.text_id = c_top1.text_id
+                    AND c_other.rank > 1
+                JOIN annotations a_top1 ON a_top1.text_id = c_top1.text_id
+                    AND a_top1.label = c_top1.label
+                WHERE c_top1.rank = 1
+                    AND a_top1.decision = 'no'
+                GROUP BY c_other.label
+                """
+            ).fetchall()
+
+            # Get cluster info
+            intent_clusters = conn.execute(
+                "SELECT label, cluster FROM intents"
+            ).fetchall()
+
+        # Build dataframes
+        top1_df = pd.DataFrame(top1_stats, columns=[
+            "label", "top1_count", "top1_yes", "top1_no"
+        ]) if top1_stats else pd.DataFrame(columns=["label", "top1_count", "top1_yes", "top1_no"])
+
+        missed_df = pd.DataFrame(missed_stats, columns=[
+            "label", "missed_opportunity_count"
+        ]) if missed_stats else pd.DataFrame(columns=["label", "missed_opportunity_count"])
+
+        potential_df = pd.DataFrame(potential_missed, columns=[
+            "label", "potential_count"
+        ]) if potential_missed else pd.DataFrame(columns=["label", "potential_count"])
+
+        cluster_df = pd.DataFrame(intent_clusters, columns=[
+            "label", "cluster"
+        ]) if intent_clusters else pd.DataFrame(columns=["label", "cluster"])
+
+        # Merge all
+        result = top1_df.merge(missed_df, on="label", how="outer")
+        result = result.merge(potential_df, on="label", how="outer")
+        result = result.merge(cluster_df, on="label", how="left")
+
+        # Fill NaN with 0
+        for col in ["top1_count", "top1_yes", "top1_no", "missed_opportunity_count", "potential_count"]:
+            result[col] = result[col].fillna(0).astype(int)
+
+        # Calculate metrics
+        result["top1_precision"] = result.apply(
+            lambda r: r["top1_yes"] / r["top1_count"] if r["top1_count"] > 0 else None,
+            axis=1
+        )
+        result["missed_rate"] = result.apply(
+            lambda r: r["missed_opportunity_count"] / r["potential_count"] if r["potential_count"] > 0 else None,
+            axis=1
+        )
+
+        return result.sort_values("top1_count", ascending=False)
     
     def get_cluster_progress(self) -> pd.DataFrame:
         """Get annotation progress by cluster.
@@ -214,12 +318,9 @@ class StatsService(BaseRepository):
         with get_connection(self.db_path) as conn:
             return pd.read_sql_query(query, conn)
     
-    def get_disagreements(self, min_annotators: int = 2) -> pd.DataFrame:
+    def get_disagreements(self) -> pd.DataFrame:
         """Get texts with annotation disagreements.
         
-        Args:
-            min_annotators: Minimum annotators required
-            
         Returns:
             DataFrame with disagreement cases
         """
@@ -241,7 +342,7 @@ class StatsService(BaseRepository):
         """
         
         with get_connection(self.db_path) as conn:
-            return pd.read_sql_query(query, conn, params=(min_annotators,))
+            return pd.read_sql_query(query, conn, params=(2,))
     
     def export_annotations(self, output_path: str) -> int:
         """Export all annotations to CSV.

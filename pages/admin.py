@@ -95,7 +95,7 @@ def show_overall_stats(stats_service: StatsService):
     """Display overall statistics."""
     st.header("📊 Общая статистика")
     
-    df = stats_service.get_overall_stats(min_annotators=settings.min_annotators)
+    df = stats_service.get_overall_stats()
     
     if not df.empty:
         row = df.iloc[0]
@@ -111,7 +111,6 @@ def show_overall_stats(stats_service: StatsService):
         
         with col2:
             st.metric("Текстов размечено", f"{annotated_texts:,}")
-            st.caption(f"Min annotators: {settings.min_annotators}")
         
         with col3:
             st.metric("Осталось разметить", f"{pending_texts:,}")
@@ -123,9 +122,151 @@ def show_overall_stats(stats_service: StatsService):
             else:
                 st.metric("% c доп. интентами", "0.0%")
 
+    # Divider
+    st.divider()
 
-def show_activity_stats(stats_service: StatsService):
-    """Display activity charts."""
+    # Intent Model Quality Block (Restored)
+    st.header("Качество модели по интентам")
+    st.markdown("""
+    Метрики для понимания, какие интенты модель предсказывает хорошо, а какие — плохо:
+    - **Top-1 Precision** — когда интент на 1 месте, как часто разметчик ставит "yes"
+    - **Missed Rate** — когда интент на 2-N месте И top-1 отвергнут (no), как часто этот интент получает "yes"
+      (высокий missed rate = модель часто ставит этот интент ниже, чем нужно)
+    """)
+
+    model_quality = stats_service.get_model_quality_legacy()
+    if not model_quality.empty:
+        col1, col2 = st.columns(2)
+        with col1:
+            mq_clusters = ["Все"] + sorted(model_quality["cluster"].dropna().unique().tolist())
+            mq_selected_cluster = st.selectbox("Фильтр по кластеру", mq_clusters, key="mq_cluster")
+            mq_min_top1 = st.slider("Минимум Top-1 появлений", 0, int(model_quality["top1_count"].max()) if not model_quality.empty else 10, 0, key="mq_min")
+
+        mq_filtered = model_quality.copy()
+        if mq_selected_cluster != "Все":
+            mq_filtered = mq_filtered[mq_filtered["cluster"] == mq_selected_cluster]
+        mq_filtered = mq_filtered[mq_filtered["top1_count"] >= mq_min_top1]
+
+        with col2:
+            mq_sort_options = {
+                "По Top-1 частоте (↓)": ("top1_count", False),
+                "По Top-1 Precision (↑)": ("top1_precision", True),
+                "По Top-1 Precision (↓)": ("top1_precision", False),
+                "По Missed Rate (↓)": ("missed_rate", False),
+            }
+            mq_sort_by = st.selectbox("Сортировка", list(mq_sort_options.keys()), key="mq_sort")
+            sort_col, sort_asc = mq_sort_options[mq_sort_by]
+            mq_filtered = mq_filtered.sort_values(sort_col, ascending=sort_asc, na_position="last")
+
+        st.dataframe(
+            mq_filtered[["label", "cluster", "top1_count", "top1_yes", "top1_no",
+                         "top1_precision", "potential_count",
+                         "missed_opportunity_count", "missed_rate"]],
+            column_config={
+                "label": "Интент",
+                "cluster": "Кластер",
+                "top1_count": "Top-1 раз",
+                "top1_yes": "Top-1 Yes",
+                "top1_no": "Top-1 No",
+                "top1_precision": st.column_config.NumberColumn("Top-1 Precision", format="%.1f%%"),
+                "potential_count": "Потенц. пропусков",
+                "missed_opportunity_count": "Факт. пропусков",
+                "missed_rate": st.column_config.NumberColumn("Missed Rate", format="%.1f%%")
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # Highlight problematic intents
+        st.subheader("Интенты, требующие внимания")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Низкий Top-1 Precision**")
+            st.caption("Модель уверена, но ошибается")
+            low_top1_prec = model_quality[model_quality["top1_count"] >= 3].nsmallest(10, "top1_precision")
+            
+            if not low_top1_prec.empty:
+                # Calculate Disagreement Rate
+                low_top1_prec["disagreement_rate"] = low_top1_prec.apply(
+                    lambda r: r["top1_no"] / r["top1_count"] if r["top1_count"] > 0 else 0.0,
+                    axis=1
+                )
+                
+                st.dataframe(
+                    low_top1_prec[["label", "top1_precision", "top1_count", "disagreement_rate"]],
+                    column_config={
+                        "label": "Интент",
+                        "top1_precision": st.column_config.NumberColumn("Precision", format="%.1f%%"),
+                        "top1_count": "Top-1 раз",
+                        "disagreement_rate": st.column_config.NumberColumn("Disagreement Rate", format="%.1f%%")
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+        with col2:
+            st.markdown("**Высокий Missed Rate**")
+            st.caption("Модель недооценивает этот интент")
+            
+            # Metric Explanation
+            with st.expander("ℹ️ Что означают эти метрики?"):
+                st.markdown("""
+                - **Пропущено (Missed Opportunity)**: Количество раз, когда этот интент был правильным (Yes), но модель поставила его **не на 1 место**.
+                - **Потенциал (Potential Count)**: Количество раз, когда этот интент был кандидатом (2-5 место), а Top-1 был отвергнут. Это ситуации, где модель могла бы "спасти" аннотацию, если бы ранжировала лучше.
+                - **Missed Rate**: Пропущено / Потенциал. Высокий процент означает, что модель часто ставит верный интент на вторые роли.
+                """)
+            
+            high_missed = model_quality[model_quality["potential_count"] >= 3].nlargest(10, "missed_rate")
+            if not high_missed.empty:
+                st.dataframe(
+                    high_missed[["label", "missed_rate", "missed_opportunity_count", "potential_count"]],
+                    column_config={
+                        "label": "Интент",
+                        "missed_rate": st.column_config.NumberColumn("Missed Rate", format="%.1f%%"),
+                        "missed_opportunity_count": "Пропущено",
+                        "potential_count": "Потенциал"
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+    else:
+        st.info("Недостаточно данных для расчета метрик качества модели.")
+
+
+
+
+
+def show_annotator_stats(stats_service: StatsService):
+    """Display annotator statistics."""
+    st.header("👥 Статистика разметчиков")
+    
+    # 1. General Stats Table
+    df = stats_service.get_annotator_stats()
+    
+    if not df.empty:
+        # Format percentages
+        df['yes_rate'] = df['yes_rate'].apply(lambda x: f"{x*100:.1f}%")
+        
+        st.dataframe(
+            df,
+            column_config={
+                "annotator": "Разметчик",
+                "texts_annotated": "Размечено текстов",
+                "total_decisions": "Всего решений",
+                "yes_count": "Да",
+                "no_count": "Нет",
+                "yes_rate": "% Да"
+            },
+            hide_index=True,
+            width="stretch"
+        )
+    else:
+        st.info("Нет данных")
+
+    st.divider()
+
+    # 2. Activity Charts (Moved from Activity Stats)
     # Daily Activity
     st.subheader("Активность по дням")
     daily = stats_service.get_daily_activity()
@@ -133,7 +274,7 @@ def show_activity_stats(stats_service: StatsService):
         chart = alt.Chart(daily).mark_bar().encode(
             x=alt.X('date:O', axis=alt.Axis(labelAngle=0, title='Дата')),
             y=alt.Y('count:Q', title='Количество'),
-            color=alt.Color('annotator:N', title='Аннотатор'),
+            color=alt.Color('annotator:N', title='Разметчик'),
             tooltip=['date', 'annotator', 'count']
         ).interactive()
         st.altair_chart(chart, use_container_width=True)
@@ -161,7 +302,7 @@ def show_activity_stats(stats_service: StatsService):
             chart = alt.Chart(hourly_filtered).mark_bar().encode(
                 x=alt.X('hour:O', axis=alt.Axis(labelAngle=0, title='Час')),
                 y=alt.Y('count:Q', title='Количество'),
-                color=alt.Color('annotator:N', title='Аннотатор'),
+                color=alt.Color('annotator:N', title='Разметчик'),
                 tooltip=['hour', 'annotator', 'count']
             ).interactive()
             st.altair_chart(chart, use_container_width=True)
@@ -177,33 +318,6 @@ def show_activity_stats(stats_service: StatsService):
             st.dataframe(summary, use_container_width=True, hide_index=True)
     else:
         st.info("Нет данных об активности по часам.")
-
-
-def show_annotator_stats(stats_service: StatsService):
-    """Display annotator statistics."""
-    st.header("👥 Статистика аннотаторов")
-    
-    df = stats_service.get_annotator_stats()
-    
-    if not df.empty:
-        # Format percentages
-        df['yes_rate'] = df['yes_rate'].apply(lambda x: f"{x*100:.1f}%")
-        
-        st.dataframe(
-            df,
-            column_config={
-                "annotator": "Аннотатор",
-                "texts_annotated": "Размечено текстов",
-                "total_decisions": "Всего решений",
-                "yes_count": "Да",
-                "no_count": "Нет",
-                "yes_rate": "% Да"
-            },
-            hide_index=True,
-            width="stretch"
-        )
-    else:
-        st.info("Нет данных")
 
 
 def show_intent_quality(stats_service: StatsService):
@@ -318,10 +432,10 @@ def show_text_overview(stats_service: StatsService):
                 help="Показать тексты, где эти интенты входят в Top-5 предсказаний"
             )
             human_intents = st.multiselect(
-                "Интенты (аннотаторы)",
+                "Интенты (разметчики)",
                 options=all_intents,
                 key="filter_human",
-                help="Показать тексты, где аннотаторы выбрали эти интенты (Yes)"
+                help="Показать тексты, где разметчики выбрали эти интенты (Yes)"
             )
             
             # Sync back to query params
@@ -333,9 +447,9 @@ def show_text_overview(stats_service: StatsService):
                 "Назначено на",
                 options=all_annotators,
                 key="filter_assigned",
-                help="Фильтр по назначенным аннотаторам"
+                help="Фильтр по назначенным разметчикам"
             )
-            only_disagreements = st.toggle("Только разногласия", key="filter_disagreements", help="Показать тексты, где аннотаторы разошлись во мнениях")
+            only_disagreements = st.toggle("Только разногласия", key="filter_disagreements", help="Показать тексты, где разметчики разошлись во мнениях")
 
     # 2. Base Count for pagination (needed before fetching data)
     total_count = stats_service.get_text_count(
@@ -551,7 +665,7 @@ def show_disagreements(stats_service: StatsService):
     """Display annotation disagreements."""
     st.header("⚠️ Разногласия")
     
-    df = stats_service.get_disagreements(min_annotators=settings.min_annotators)
+    df = stats_service.get_disagreements()
     
     if not df.empty:
         st.write(f"Найдено {len(df)} случаев разногласий:")
@@ -562,7 +676,7 @@ def show_disagreements(stats_service: StatsService):
                 "text_id": "ID текста",
                 "request_text": st.column_config.TextColumn("Текст", width="large"),
                 "label": "Интент",
-                "annotator_count": "Аннотаторов",
+                "annotator_count": "Разметчиков",
                 "yes_count": "Да",
                 "no_count": "Нет"
             },
@@ -760,7 +874,7 @@ def main():
     # Navigation Tabs Definition
     tabs = [
         "📊 Обзор",
-        "👥 Аннотаторы",
+        "👥 Разметчики",
         "🎯 Качество",
         "📝 Тексты",
         "📈 Кластеры",
@@ -814,9 +928,8 @@ def main():
 
     if selected_tab == "📊 Обзор":
         show_overall_stats(stats_service)
-        show_activity_stats(stats_service)
     
-    elif selected_tab == "👥 Аннотаторы":
+    elif selected_tab == "👥 Разметчики":
         show_annotator_stats(stats_service)
     
     elif selected_tab == "🎯 Качество":

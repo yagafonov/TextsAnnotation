@@ -227,8 +227,7 @@ class TestImportServiceCSV:
         texts = repo.get_unannotated(
             annotator="test",
             clusters=None,
-            language=None,
-            min_annotators=1
+            language=None
         )
         
         if texts:
@@ -285,8 +284,7 @@ class TestImportServiceClusterDetermination:
             texts = repo.get_unannotated(
                 annotator="test",
                 clusters=None,
-                language=None,
-                min_annotators=1
+                language=None
             )
             assert texts[0]['assigned_cluster'] == 'cluster1'  # First cluster
         finally:
@@ -382,8 +380,7 @@ class TestImportServiceClusterDetermination:
             texts = repo.get_unannotated(
                 annotator="test",
                 clusters=None,
-                language=None,
-                min_annotators=1
+                language=None
             )
             assert texts[0]['assigned_cluster'] == 'unknown'
         finally:
@@ -502,8 +499,7 @@ class TestImportServiceEdgeCases:
             texts = text_repo.get_unannotated(
                 annotator="test",
                 clusters=None,
-                language=None,
-                min_annotators=1
+                language=None
             )
             assert texts[0]['data_version'] == 5
         finally:

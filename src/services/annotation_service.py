@@ -28,8 +28,8 @@ class AnnotationService:
         self,
         annotator: str,
         clusters: Optional[List[str]] = None,
+        intents: Optional[List[str]] = None,
         language: Optional[str] = None,
-        min_annotators: int = 2,
         show_skipped: bool = False
     ) -> Optional[dict]:
         """Get next text for annotation.
@@ -37,8 +37,8 @@ class AnnotationService:
         Args:
             annotator: Annotator name
             clusters: Filter by clusters
+            intents: Filter by intents
             language: Filter by language
-            min_annotators: Minimum annotators required
             show_skipped: Show only skipped texts
             
         Returns:
@@ -47,8 +47,8 @@ class AnnotationService:
         texts = self.text_repo.get_unannotated(
             annotator=annotator,
             clusters=clusters,
+            intents=intents,
             language=language,
-            min_annotators=min_annotators,
             show_skipped=show_skipped
         )
         
@@ -56,6 +56,7 @@ class AnnotationService:
             return None
         
         return dict(texts[0])
+
     
     def get_text_with_candidates(self, text_id: int) -> Tuple[Optional[Text], List[Candidate]]:
         """Get text and its candidates.
@@ -124,6 +125,7 @@ class AnnotationService:
         self,
         annotator: str,
         clusters: Optional[List[str]] = None,
+        intents: Optional[List[str]] = None,
         language: Optional[str] = None
     ) -> dict:
         """Get annotation progress.
@@ -131,6 +133,7 @@ class AnnotationService:
         Args:
             annotator: Annotator name
             clusters: Filter by clusters
+            intents: Filter by intents
             language: Filter by language
             
         Returns:
@@ -139,6 +142,7 @@ class AnnotationService:
         return self.annotation_repo.get_progress(
             annotator=annotator,
             clusters=clusters,
+            intents=intents,
             language=language
         )
 
@@ -147,12 +151,14 @@ class AnnotationService:
         _self,
         annotator: str,
         clusters: Optional[List[str]] = None,
+        intents: Optional[List[str]] = None,
         language: Optional[str] = None
     ) -> List[dict]:
         """Get all texts for navigation (cached)."""
         return _self.text_repo.get_all_texts_for_annotator(
             annotator=annotator,
             clusters=clusters,
+            intents=intents,
             language=language
         )
 
