@@ -11,9 +11,12 @@ from src.utils.logger import logger
 class StatsService(BaseRepository):
     """Service for generating statistics and metrics."""
     
-    def get_overall_stats(self) -> pd.DataFrame:
+    def get_overall_stats(self, min_annotators: int = 1) -> pd.DataFrame:
         """Get overall annotation statistics.
         
+        Args:
+            min_annotators: Minimum annotators to consider text as annotated
+            
         Returns:
             DataFrame with overall stats
         """
@@ -22,11 +25,61 @@ class StatsService(BaseRepository):
                 COUNT(DISTINCT t.id) as total_texts,
                 COUNT(DISTINCT a.annotator) as total_annotators,
                 COUNT(DISTINCT a.id) as total_annotations,
-                COUNT(DISTINCT CASE WHEN a.decision = 'yes' THEN a.id END) as positive_annotations
+                COUNT(DISTINCT CASE WHEN a.decision = 'yes' THEN a.id END) as positive_annotations,
+                (
+                    SELECT COUNT(*) FROM (
+                        SELECT text_id 
+                        FROM annotations 
+                        GROUP BY text_id 
+                        HAVING COUNT(DISTINCT annotator) >= ?
+                    )
+                ) as fully_annotated_texts,
+                (
+                    SELECT COUNT(DISTINCT text_id) 
+                    FROM annotations 
+                    WHERE is_candidate = 0
+                ) as texts_with_extra_intents
             FROM texts t
             LEFT JOIN annotations a ON t.id = a.text_id
         """
         
+        with get_connection(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(min_annotators,))
+    
+    def get_daily_activity(self) -> pd.DataFrame:
+        """Get annotation activity by day.
+        
+        Returns:
+            DataFrame with daily activity [date, annotator, count]
+        """
+        query = """
+            SELECT
+                DATE(created_at) as date,
+                annotator,
+                COUNT(*) as count
+            FROM annotations
+            GROUP BY DATE(created_at), annotator
+            ORDER BY date DESC
+        """
+        with get_connection(self.db_path) as conn:
+            return pd.read_sql_query(query, conn)
+
+    def get_hourly_activity(self) -> pd.DataFrame:
+        """Get annotation activity by hour.
+        
+        Returns:
+            DataFrame with hourly activity [date, hour, annotator, count]
+        """
+        query = """
+            SELECT
+                DATE(created_at) as date,
+                CAST(strftime('%H', created_at) AS INTEGER) as hour,
+                annotator,
+                COUNT(*) as count
+            FROM annotations
+            GROUP BY DATE(created_at), strftime('%H', created_at), annotator
+            ORDER BY date DESC, hour
+        """
         with get_connection(self.db_path) as conn:
             return pd.read_sql_query(query, conn)
     

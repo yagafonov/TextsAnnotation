@@ -94,26 +94,78 @@ def show_overall_stats(stats_service: StatsService):
     """Display overall statistics."""
     st.header("📊 Общая статистика")
     
-    df = stats_service.get_overall_stats()
+    df = stats_service.get_overall_stats(min_annotators=settings.min_annotators)
     
     if not df.empty:
         row = df.iloc[0]
+        total_texts = int(row['total_texts'])
+        annotated_texts = int(row['fully_annotated_texts'])
+        pending_texts = total_texts - annotated_texts
+        extra_intents_texts = int(row['texts_with_extra_intents'])
         
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Всего текстов", f"{int(row['total_texts']):,}")
+            st.metric("Всего текстов", f"{total_texts:,}")
         
         with col2:
-            st.metric("Аннотаторов", f"{int(row['total_annotators']):,}")
+            st.metric("Текстов размечено", f"{annotated_texts:,}")
+            st.caption(f"Min annotators: {settings.min_annotators}")
         
         with col3:
-            st.metric("Аннотаций", f"{int(row['total_annotations']):,}")
+            st.metric("Осталось разметить", f"{pending_texts:,}")
         
         with col4:
-            if row['total_annotations'] > 0:
-                yes_pct = int(100 * row['positive_annotations'] / row['total_annotations'])
-                st.metric("% Положительных", f"{yes_pct}%")
+            if total_texts > 0:
+                extra_pct = (extra_intents_texts / total_texts) * 100
+                st.metric("% c доп. интентами", f"{extra_pct:.1f}%")
+            else:
+                st.metric("% c доп. интентами", "0.0%")
+
+
+def show_activity_stats(stats_service: StatsService):
+    """Display activity charts."""
+    # Daily Activity
+    st.subheader("Активность по дням")
+    daily = stats_service.get_daily_activity()
+    if not daily.empty:
+        pivot = daily.pivot(index="date", columns="annotator", values="count").fillna(0)
+        st.bar_chart(pivot)
+    
+    # Hourly Activity
+    st.subheader("Активность по часам")
+    hourly = stats_service.get_hourly_activity()
+    if not hourly.empty:
+        # Date filter
+        available_dates = sorted(hourly["date"].unique(), reverse=True)
+        selected_date = st.selectbox(
+            "Выберите дату",
+            available_dates,
+            key="hourly_date"
+        )
+
+        hourly_filtered = hourly[hourly["date"] == selected_date]
+        if not hourly_filtered.empty:
+            # Create pivot: hours as index, annotators as columns
+            hourly_pivot = hourly_filtered.pivot(index="hour", columns="annotator", values="count").fillna(0)
+            # Ensure all hours 0-23 are present
+            all_hours = pd.DataFrame(index=range(24))
+            hourly_pivot = all_hours.join(hourly_pivot).fillna(0)
+            hourly_pivot.index.name = "Час"
+
+            st.bar_chart(hourly_pivot)
+            
+            # Summary table
+            summary = hourly_filtered.groupby("annotator").agg(
+                total=("count", "sum"),
+                hours_active=("hour", "nunique"),
+                first_hour=("hour", "min"),
+                last_hour=("hour", "max")
+            ).reset_index()
+            summary.columns = ["Разметчик", "Всего", "Часов", "Начало", "Конец"]
+            st.dataframe(summary, use_container_width=True, hide_index=True)
+    else:
+        st.info("Нет данных об активности по часам.")
 
 
 def show_annotator_stats(stats_service: StatsService):
@@ -745,6 +797,7 @@ def main():
 
     if selected_tab == "📊 Обзор":
         show_overall_stats(stats_service)
+        show_activity_stats(stats_service)
     
     elif selected_tab == "👥 Аннотаторы":
         show_annotator_stats(stats_service)
