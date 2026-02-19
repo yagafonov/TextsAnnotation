@@ -409,21 +409,19 @@ def show_annotation_interface(
         text_preview = t["request_text"][:40] + "..." if len(t["request_text"]) > 40 else t["request_text"]
         return f"{marker}{status}[{t['id']}] {text_preview}"
 
-    def on_text_select():
-        # Callback to update session state when user selects a text
-        selected_idx_in_filtered = st.session_state.nav_text_select
-        real_index = text_to_original_index[selected_idx_in_filtered]
-        st.session_state.current_text_index = real_index
-
-    st.sidebar.selectbox(
+    selected_idx = st.sidebar.selectbox(
         "Перейти к тексту:",
         options=options,
         index=current_filtered_index,
         format_func=format_text_option,
-        key="nav_text_select",
-        on_change=on_text_select,
         help="Выберите текст из списка или начните ввод для поиска"
     )
+
+    if selected_idx != current_filtered_index:
+        # User changed selection
+        real_index = text_to_original_index[selected_idx]
+        st.session_state.current_text_index = real_index
+        st.rerun()
     st.sidebar.info(f"Текст ID: {current_real_id} ({current_filtered_index + 1} из {len(filtered_texts)} отфильтрованных)")
 
     # Get current text
