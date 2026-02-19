@@ -10,22 +10,22 @@ annotators:
   - money_transfers_rus
   - restrictions_rus
   - social_rus
-  intents:
-  - avtokredit
-  - how_open_card
-  - agree
-  - disagree
-  - are_you_robot
-  - insufficient_funds
-  - return_goods_credit
-  - deposit__zakrit
-  - already
-  - not_remember
-  - halyk_sale
-  - halyk_client
-  - cant_pay_by_card
-  - dostavka_karty__prichina_otkaza
-  - check_balance
+  # intents:
+  # - avtokredit
+  # - how_open_card
+  # - agree
+  # - disagree
+  # - are_you_robot
+  # - insufficient_funds
+  # - return_goods_credit
+  # - deposit__zakrit
+  # - already
+  # - not_remember
+  # - halyk_sale
+  # - halyk_client
+  # - cant_pay_by_card
+  # - dostavka_karty__prichina_otkaza
+  # - check_balance
 - name: madina
   language: Казахский
   password: knvws1
@@ -37,22 +37,22 @@ annotators:
   - money_transfers_rus
   - restrictions_rus
   - social_rus
-  intents:
-  - what_is_kbe
-  - current_loan__bvu_transfer
-  - why
-  - already
-  - razblock_card__razblock
-  - change_tРусскийsted_number
-  - ipoteka__kakoi_procent
-  - unable
-  - repeat
-  - extend_ATM_limit
-  - cant_pay_by_card
-  - change_lang_Русский
-  - otherway
-  - avtokredit
-  - extend_terminal_limit
+  # intents:
+  # - what_is_kbe
+  # - current_loan__bvu_transfer
+  # - why
+  # - already
+  # - razblock_card__razblock
+  # - change_trusted_number
+  # - ipoteka__kakoi_procent
+  # - unable
+  # - repeat
+  # - extend_ATM_limit
+  # - cant_pay_by_card
+  # - change_lang_ru
+  # - otherway
+  # - avtokredit
+  # - extend_terminal_limit
 - name: roma
   language: Русский
   password: vnbhb4
@@ -64,22 +64,22 @@ annotators:
   - money_transfers_rus
   - restrictions_rus
   - social_rus
-  intents:
-  - ipoteka__refinans
-  - scum
-  - insufficient_funds
-  - pension_receipt
-  - razblock_card__razblock_internet_but
-  - amount_date_payment_one_specific_loan
-  - limit__kak_snyat_dengi_s_kassi
-  - what_is_knp
-  - talk_to_operator
-  - deposit__zakrit
-  - goods_credit
-  - limit__ne_prohodit_perevod
-  - prosroch_zadol__credit_zabyl
-  - other_bank_general
-  - cant_pay_by_card
+  # intents:
+  # - ipoteka__refinans
+  # - scum
+  # - insufficient_funds
+  # - pension_receipt
+  # - razblock_card__razblock_internet_but
+  # - amount_date_payment_one_specific_loan
+  # - limit__kak_snyat_dengi_s_kassi
+  # - what_is_knp
+  # - talk_to_operator
+  # - deposit__zakrit
+  # - goods_credit
+  # - limit__ne_prohodit_perevod
+  # - prosroch_zadol__credit_zabyl
+  # - other_bank_general
+  # - cant_pay_by_card
 - name: iskander
   language: Русский
   password: mokensvjb1
@@ -91,19 +91,19 @@ annotators:
   - money_transfers_rus
   - restrictions_rus
   - social_rus
-  intents:
-  - what_is_kbe
-  - monthly_payment_amount
-  - what_is_your_name
-  - are_you_robot
-  - zabyl_kartu__kak_snyat_bez_karty
-  - why
-  - bank_operating_hours
-  - ipoteka__avto_spisanie
-  - limit__ne_prohodit_perevod
-  - change_lang_Русский
-  - platezhi__kak_otmenit
-  - send_zolotaya_korona_transfer
-  - cant_make_payments
-  - unable
-  - what_is_tРусскийsted
+  # intents:
+  # - what_is_kbe
+  # - monthly_payment_amount
+  # - what_is_your_name
+  # - are_you_robot
+  # - zabyl_kartu__kak_snyat_bez_karty
+  # - why
+  # - bank_operating_hours
+  # - ipoteka__avto_spisanie
+  # - limit__ne_prohodit_perevod
+  # - change_lang_ru
+  # - platezhi__kak_otmenit
+  # - send_zolotaya_korona_transfer
+  # - cant_make_payments
+  # - unable
+  # - what_is_trusted
