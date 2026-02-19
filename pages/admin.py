@@ -19,7 +19,7 @@ from src.services.auth_service import AuthService
 from src.services.import_service import ImportService
 from src.services.stats_service import StatsService
 from src.utils.config import settings
-from src.utils.database import get_connection
+from src.utils.database import get_connection, init_database
 
 # Admin password
 ADMIN_PASSWORD = os.environ.get("TEXTS_ADMIN_PASSWORD", "admin123")
@@ -794,9 +794,11 @@ def show_import_section():
                             model_version = int(model_version_row["value"]) if model_version_row else 0
                             data_version = int(data_version_row["value"]) if data_version_row else 0
                         
-                        # Load intents
+                        # Load intents and sync to DB (so Texts tab filters work)
                         intent_repo = IntentRepository(settings.db_path)
                         intents = intent_repo.load_from_yaml(settings.intents_path)
+                        for intent in intents.values():
+                            intent_repo.upsert(intent)
 
                         # Load annotators for assignment
                         auth_service = AuthService(settings.annotators_path)
@@ -874,10 +876,13 @@ def show_import_section():
 def main():
     """Main admin dashboard."""
     st.title("📊 Панель администратора")
-    
+
+    # Ensure DB schema exists (in case app.py hasn't run yet)
+    init_database(settings.db_path)
+
     # Authentication
     authenticate_admin()
-    
+
     # Initialize service
     stats_service = StatsService(settings.db_path)
     

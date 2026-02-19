@@ -60,12 +60,9 @@ class ImportService:
                 
                 for row in reader:
                     text = row.get("request_text", "").strip()
-                    print(f"DEBUG IMPORT: text='{text}', keys={row.keys()}")
                     if not text:
-                        print("DEBUG IMPORT: Missing text")
                         continue
                     if self.text_repo.exists(text):
-                        print("DEBUG IMPORT: Text exists")
                         continue
                     
                     language = self._normalize_language(row.get("language"))
