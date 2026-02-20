@@ -3,6 +3,7 @@
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
 import altair as alt
 import extra_streamlit_components as stx
@@ -926,8 +927,7 @@ def show_import_section():
                                 "SELECT COUNT(*) FROM texts WHERE assigned_to IS NULL OR assigned_to = ''"
                             ).fetchone()[0]
                         if unassigned > 0:
-                            texts_tab = "📝 Тексты"
-                            link = f"/admin?tab={texts_tab}&assigned=[Unassigned]"
+                            link = "/admin?" + urlencode({"tab": "📝 Тексты", "assigned": "[Unassigned]"})
                             st.warning(
                                 f"⚠️ {unassigned} текстов не назначены разметчикам. "
                                 f"[Открыть в Текстах]({link})"
