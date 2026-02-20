@@ -67,6 +67,17 @@ def restore_from_dump(db_path: str, dump_path: str) -> None:
     try:
         with sqlite3.connect(db_path) as conn, open(dump_path, "r", encoding="utf-8") as f:
             conn.executescript(f.read())
+
+            # Backfill assigned_to from actual annotators in imported dump
+            conn.execute("""
+                UPDATE texts SET assigned_to = (
+                    SELECT GROUP_CONCAT(DISTINCT annotator)
+                    FROM annotations WHERE text_id = texts.id
+                )
+                WHERE (assigned_to IS NULL OR assigned_to = '')
+                  AND id IN (SELECT DISTINCT text_id FROM annotations)
+            """)
+
             conn.commit()
         logger.info("Database restored successfully")
     except Exception as e:
