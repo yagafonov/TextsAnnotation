@@ -170,7 +170,8 @@ class TestAnnotationRepository:
                 assigned_cluster="cluster1",
                 data_version=1,
                 candidates=[],
-                model_version=1
+                model_version=1,
+                assigned_to="test_user"
             )
             
             # Annotate first 3

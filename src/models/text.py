@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class Text(BaseModel):
@@ -18,15 +18,16 @@ class Text(BaseModel):
     data_version: int = Field(default=0, description="Data version")
     created_at: Optional[str] = Field(default=None, description="Creation timestamp")
     
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
-                "request_text": "Как перевести деньги?",
+                "text": "Как перевести деньги?",
                 "language": "ru",
                 "assigned_cluster": "transactions",
                 "data_version": 1
             }
         }
+    )
 
 
 class Annotation(BaseModel):
@@ -40,7 +41,7 @@ class Annotation(BaseModel):
     is_candidate: bool = Field(default=False, description="Was this from candidates")
     created_at: Optional[str] = Field(default=None)
     
-    class Config:
+    model_config = ConfigDict(
         json_schema_extra = {
             "example": {
                 "text_id": 1,
@@ -50,6 +51,7 @@ class Annotation(BaseModel):
                 "is_candidate": True
             }
         }
+    )
 
 
 class SkippedText(BaseModel):

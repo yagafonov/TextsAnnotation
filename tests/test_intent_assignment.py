@@ -104,7 +104,8 @@ class TestIntentBasedAssignment:
             assigned_cluster="cluster1",
             data_version=1,
             candidates=[Candidate(label="intent_a", rank=1, probability=0.9)],
-            model_version=1
+            model_version=1,
+            assigned_to="user"
         )
         
         # Annotate it

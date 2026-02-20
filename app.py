@@ -5,6 +5,7 @@ Uses the new modular architecture with services and repositories.
 """
 
 import os
+import sys
 import html
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,6 +19,8 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
+_MOD_KEY = "⌘" if sys.platform == "darwin" else "Ctrl"
+
 # Import new architecture components
 from src.models.annotator import Annotator
 from src.models.candidate import Candidate
@@ -26,23 +29,79 @@ from src.repositories.intent_repo import IntentRepository
 from src.services.annotation_service import AnnotationService
 from src.services.auth_service import AuthService
 from src.services.import_service import ImportService
-from src.utils.config import settings
+from src.utils.config import settings, LANGUAGE_NAMES
 from src.utils.database import init_database, restore_from_dump, start_auto_dump
 from src.utils.logger import logger
+
+# Read layout preference from query params (before set_page_config)
+_layout_pref = st.query_params.get("layout", "wide")
+if _layout_pref not in ("wide", "centered"):
+    _layout_pref = "wide"
 
 # Page configuration
 st.set_page_config(
     page_title="TextsAnnotation",
     page_icon="📝",
-    layout="wide",
+    layout=_layout_pref,
     initial_sidebar_state="expanded"
 )
+
+# Dark theme CSS (injected early to minimize flash)
+DARK_THEME_CSS = """
+<style>
+    :root {
+        --primary-color: #ff4b4b;
+        --background-color: #0e1117;
+        --secondary-background-color: #262730;
+        --text-color: #fafafa;
+        color-scheme: dark;
+    }
+    .stApp, [data-testid="stAppViewContainer"] { background-color: #0e1117; color: #fafafa; }
+    [data-testid="stSidebar"] { background-color: #262730; }
+    [data-testid="stHeader"] { background-color: #0e1117; }
+    [data-testid="stSidebar"] [data-testid="stMarkdown"],
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stRadio label { color: #fafafa; }
+    .stSelectbox [data-baseweb="select"],
+    .stMultiSelect [data-baseweb="select"] { background-color: #262730; }
+    .stTextInput input, .stTextArea textarea, .stNumberInput input {
+        background-color: #262730; color: #fafafa; border-color: #4a4a5a;
+    }
+    hr { border-color: #4a4a5a; }
+    [data-testid="stMetricValue"], [data-testid="stMetricLabel"] { color: #fafafa; }
+    [data-testid="stExpander"] { border-color: #4a4a5a; }
+    .stDataFrame, .stTable { color: #fafafa; }
+    div[data-baseweb="popover"] ul { background-color: #262730; }
+    div[data-baseweb="popover"] li:hover { background-color: #3a3a4a; }
+</style>
+"""
+
+if st.query_params.get("dark") == "1":
+    st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
 
 # @st.cache_resource removed due to CachedWidgetWarning
 def get_cookie_manager():
     return stx.CookieManager()
 
 cookie_manager = get_cookie_manager()
+
+
+def _sync_settings_from_cookies():
+    """On first load, restore settings from cookies into query params."""
+    if st.session_state.get("_settings_synced"):
+        return
+    st.session_state._settings_synced = True
+    needs_rerun = False
+    ck_dark = cookie_manager.get("dark_mode")
+    ck_layout = cookie_manager.get("layout_mode")
+    if ck_dark is not None and "dark" not in st.query_params:
+        st.query_params["dark"] = ck_dark
+        needs_rerun = True
+    if ck_layout is not None and "layout" not in st.query_params:
+        st.query_params["layout"] = ck_layout
+        needs_rerun = True
+    if needs_rerun:
+        st.rerun()
 
 
 @st.cache_resource
@@ -107,6 +166,7 @@ def handle_import(services: dict, intents: Dict[str, Intent]):
     auth_service: AuthService = services["auth"]
     annotators_config = auth_service.load_annotators()
     
+    logger.info(f"Checking for new texts to import from: {settings.import_csv_path}")
     count = import_service.import_from_csv(
         csv_path=settings.import_csv_path,
         intents=intents,
@@ -119,10 +179,11 @@ def handle_import(services: dict, intents: Dict[str, Intent]):
     )
     
     if count > 0:
-        logger.info(f"Imported {count} texts from CSV")
+        logger.info(f"Import successful: added {count} new texts")
         st.success(f"✅ Импортировано {count} текстов")
-        st.cache_resource.clear()  # Clear cache to reload
+        st.cache_resource.clear()
     else:
+        logger.info("Import completed: no new texts found in CSV")
         st.info("ℹ️ Нет новых текстов для импорта")
 
 
@@ -220,65 +281,83 @@ def show_annotation_interface(
     with st.sidebar:
         st.write(f"**Пользователь:** {annotator.name}")
         
-        # Language mapping
-        LANGUAGES = {
-            "ru": "Русский",
-            "en": "English",
-            "kk": "Казахский",
-            "uz": "Uzbek",
-            "check": "Проверка"
-        }
-        lang_name = LANGUAGES.get(annotator.language, annotator.language)
+        lang_name = LANGUAGE_NAMES.get(annotator.language, annotator.language)
         st.write(f"**Язык:** {lang_name}")
         
-        st.write("**Кластеры/Интенты:**")
-        if annotator.intents:
-            st.write("По интентам:")
-            items_html = []
-            for intent_label in annotator.intents:
-                intent_obj = intents.get(intent_label)
-                desc = intent_obj.description if intent_obj and intent_obj.description else ""
-                label_esc = html.escape(intent_label)
-                if desc:
-                    desc_esc = html.escape(desc)
-                    items_html.append(
-                        f'<li><span class="itip">{label_esc}'
-                        f'<span class="itip-text">{desc_esc}</span></span></li>'
-                    )
-                else:
-                    items_html.append(f"<li>{label_esc}</li>")
-            st.markdown(
-                "<style>"
-                ".itip{position:relative;display:inline-block;border-bottom:1px dotted #888;}"
-                ".itip .itip-text{visibility:hidden;background:#333;color:#fff;padding:4px 8px;"
-                "border-radius:4px;position:absolute;left:0;top:110%;z-index:9999;font-size:12px;"
-                "white-space:pre-wrap;max-width:220px;line-height:1.4;pointer-events:none;}"
-                ".itip:hover .itip-text{visibility:visible;}"
-                "</style>"
-                f"<ul style='margin:0;padding-left:1.2em;list-style-type:disc;'>{''.join(items_html)}</ul>",
-                unsafe_allow_html=True
+        st.write(f"**{'Интенты' if annotator.intents else 'Кластеры'}:**")
+        # Build label stats for the dropdown
+        _use_intents = bool(annotator.intents)
+        _labels = annotator.intents if _use_intents else (annotator.clusters or [])
+        if _labels:
+            _stats = annotation_service.get_label_stats(
+                annotator=annotator.name,
+                labels=tuple(_labels),
+                threshold=settings.annotators_intents_confidence_threshold,
+                by_cluster=not _use_intents
             )
-        elif annotator.clusters:
-            st.write("По кластерам:")
-            for cluster in annotator.clusters:
-                st.markdown(f"- {cluster}")
+            _stats.sort(key=lambda s: (-(s["total"] - s["annotated"]), s["label"]))
+            _options = [None] + [s["label"] for s in _stats]
+            _format = {
+                None: "Все",
+                **{s["label"]: f"{s['label']} ({s['annotated']}/{s['total']})" for s in _stats}
+            }
+            _prev_label = st.session_state.get("selected_label")
+            _selected = st.selectbox(
+                "Фильтр",
+                options=_options,
+                format_func=lambda x: _format.get(x, x),
+                key="selected_label",
+                label_visibility="collapsed"
+            )
+            if _selected != _prev_label:
+                # If filter changed, check if current text still fits; if not, reset to 0
+                st.session_state["_label_filter_changed"] = True
         else:
             st.write("все")
         
-        if st.button("🚪 Выйти"):
-            st.session_state.authenticated_user = None
-            if cookie_manager.get("annotator_user"):
-                cookie_manager.delete("annotator_user")
-            st.query_params.clear()
-            st.rerun()
-        
+        # Settings row
+        _c_logout, _c_dark, _c_layout = st.columns([2, 1, 1])
+        with _c_logout:
+            if st.button("🚪 Выйти", width="stretch"):
+                st.session_state.authenticated_user = None
+                if cookie_manager.get("annotator_user"):
+                    cookie_manager.delete("annotator_user")
+                # Clear user param but preserve settings
+                if "user" in st.query_params:
+                    del st.query_params["user"]
+                st.rerun()
+        with _c_dark:
+            _is_dark = st.query_params.get("dark") == "1"
+            if st.button("🌙" if not _is_dark else "☀️", width="stretch", help="Тема"):
+                new_val = "0" if _is_dark else "1"
+                st.query_params["dark"] = new_val
+                cookie_manager.set("dark_mode", new_val, expires_at=datetime.now() + timedelta(days=365))
+                st.rerun()
+        with _c_layout:
+            _is_wide = st.query_params.get("layout", "wide") == "wide"
+            if st.button("↔️" if not _is_wide else "↕️", width="stretch", help="Широкий/узкий режим"):
+                new_val = "centered" if _is_wide else "wide"
+                st.query_params["layout"] = new_val
+                cookie_manager.set("layout_mode", new_val, expires_at=datetime.now() + timedelta(days=365))
+                st.rerun()
+
         st.divider()
         
+        # Resolve active label filter
+        _selected_label = st.session_state.get("selected_label")
+        _use_intents = bool(annotator.intents)
+        _filter_intents = [_selected_label] if _selected_label and _use_intents else (
+            annotator.intents if annotator.intents else None
+        )
+        _filter_clusters = [_selected_label] if _selected_label and not _use_intents else (
+            annotator.clusters if not annotator.intents and annotator.clusters else None
+        )
+
         # Progress
         progress = annotation_service.get_progress(
             annotator=annotator.name,
-            clusters=annotator.clusters if not annotator.intents and annotator.clusters else None,
-            intents=annotator.intents if annotator.intents else None,
+            clusters=_filter_clusters,
+            intents=_filter_intents,
             language=annotator.language
         )
         
@@ -288,17 +367,20 @@ def show_annotation_interface(
             pct = int(100 * progress['done'] / progress['total'])
             st.progress(pct / 100, text=f"{pct}%")
         
-        st.divider()
-        
-        # Show skipped toggle
-        show_skipped = st.checkbox("🔄 Показать пропущенные", value=False)
-    
-    # Get all texts for navigation
+    # Get all texts for navigation (respecting selected label filter)
+    _selected_label = st.session_state.get("selected_label")
+    _use_intents = bool(annotator.intents)
+    _filter_intents = annotator.intents if annotator.intents else None
+    _filter_clusters = annotator.clusters if not annotator.intents and annotator.clusters else None
+
     all_texts = annotation_service.get_all_texts(
         annotator=annotator.name,
-        clusters=annotator.clusters if not annotator.intents and annotator.clusters else None,
-        intents=annotator.intents if annotator.intents else None,
-        language=annotator.language
+        clusters=_filter_clusters,
+        intents=_filter_intents,
+        language=annotator.language,
+        candidate_label=_selected_label,
+        candidate_threshold=settings.annotators_intents_confidence_threshold if _selected_label else 0.0,
+        candidate_by_cluster=not _use_intents
     )
     
     if not all_texts:
@@ -306,9 +388,10 @@ def show_annotation_interface(
         st.balloons()
         return
 
+    all_text_ids = [t["id"] for t in all_texts]
+
     # Initialize session state for current index
     if "current_text_index" not in st.session_state:
-        # Find first unannotated
         for i, t in enumerate(all_texts):
             if not t["is_annotated"]:
                 st.session_state.current_text_index = i
@@ -316,9 +399,28 @@ def show_annotation_interface(
         else:
             st.session_state.current_text_index = 0
 
+    # Handle filter change: stay on current text if it still matches, else go to first
+    if st.session_state.pop("_label_filter_changed", False):
+        current_id = all_texts[min(st.session_state.current_text_index, len(all_texts) - 1)]["id"] \
+            if all_texts else None
+        # This current_id is from the OLD all_texts (before filter). Check if it's in the new list.
+        # We need to check against original (pre-filter) list - but we can check session text id.
+        _cur_id_in_session = st.session_state.get("current_text_id")
+        if _cur_id_in_session and _cur_id_in_session in all_text_ids:
+            st.session_state.current_text_index = all_text_ids.index(_cur_id_in_session)
+        else:
+            # Jump to first unannotated in the filtered list
+            for i, t in enumerate(all_texts):
+                if not t["is_annotated"]:
+                    st.session_state.current_text_index = i
+                    break
+            else:
+                st.session_state.current_text_index = 0
+
     # Ensure index is within bounds (e.g. after filter change)
     if st.session_state.current_text_index >= len(all_texts):
         st.session_state.current_text_index = 0
+
         
     # Sidebar navigation dropdown
     st.sidebar.divider()
@@ -359,6 +461,7 @@ def show_annotation_interface(
     
     # Ensure current text is always in the list to prevent switching
     current_real_id = all_texts[st.session_state.current_text_index]["id"]
+    st.session_state["current_text_id"] = current_real_id  # Used for filter-change navigation
     current_in_list = False
     for t in filtered_texts:
         if t["id"] == current_real_id:
@@ -427,8 +530,6 @@ def show_annotation_interface(
             break
     
     # NAVIGATION: Searchable dropdown
-    st.sidebar.write("---")
-    
     # Create options for selectbox: list of (index_in_filtered, text_representation)
     # We use index because text IDs might not be contiguous or sorted heavily
     # But for display we want "ID: Text..."
@@ -447,28 +548,31 @@ def show_annotation_interface(
         elif t["is_annotated"]: status = "✅ "
         
         # Truncate text
-        text_preview = t["request_text"][:40] + "..." if len(t["request_text"]) > 40 else t["request_text"]
+        text_preview = t["text"][:40] + "..." if len(t["text"]) > 40 else t["text"]
         return f"{marker}{status}[{t['id']}] {text_preview}"
 
-    selected_idx = st.sidebar.selectbox(
+    def on_text_nav_change():
+        selected = st.session_state["nav_text_select"]
+        if selected in text_to_original_index:
+            st.session_state.current_text_index = text_to_original_index[selected]
+
+    # Sync selectbox to current text before rendering (must be set before widget creation)
+    st.session_state["nav_text_select"] = current_filtered_index
+
+    st.sidebar.selectbox(
         "Перейти к тексту:",
         options=options,
-        index=current_filtered_index,
         format_func=format_text_option,
+        key="nav_text_select",
+        on_change=on_text_nav_change,
         help="Выберите текст из списка или начните ввод для поиска"
     )
-
-    if selected_idx != current_filtered_index:
-        # User changed selection
-        real_index = text_to_original_index[selected_idx]
-        st.session_state.current_text_index = real_index
-        st.rerun()
     st.sidebar.info(f"Текст ID: {current_real_id} ({current_filtered_index + 1} из {len(filtered_texts)} отфильтрованных)")
 
     # Get current text
     current_text = all_texts[st.session_state.current_text_index]
     text_id = current_text["id"]
-    text_content = current_text["request_text"]
+    text_content = current_text["text"]
     is_completed = current_text["is_annotated"]
     is_skipped_status = current_text["is_skipped"]
 
@@ -476,12 +580,12 @@ def show_annotation_interface(
     col_prev, col_status, col_next = st.columns([1, 4, 1])
     
     with col_prev:
-        if st.button("⬅️", width="content", disabled=st.session_state.current_text_index == 0):
+        if st.button(f"⬅️ + {_MOD_KEY}", width="content", disabled=st.session_state.current_text_index == 0):
             st.session_state.current_text_index -= 1
             st.rerun()
-            
+
     with col_next:
-        if st.button("➡️", width="content", disabled=st.session_state.current_text_index == len(all_texts) - 1):
+        if st.button(f"{_MOD_KEY} + ➡️", width="content", disabled=st.session_state.current_text_index == len(all_texts) - 1):
             st.session_state.current_text_index += 1
             st.rerun()
             
@@ -544,7 +648,11 @@ def show_annotation_interface(
         for c in candidates:
             if c.label in annotator.intents and c.probability >= threshold and c.label not in shown_map:
                 shown_map[c.label] = (c, "annotator_intent")
-    shown_items = sorted(shown_map.values(), key=lambda x: x[0].probability, reverse=True)
+    _show_conf = annotation_service.text_repo.get_setting("show_confidence", "0") == "1"
+    if _show_conf:
+        shown_items = sorted(shown_map.values(), key=lambda x: x[0].probability, reverse=True)
+    else:
+        shown_items = sorted(shown_map.values(), key=lambda x: x[0].label)
 
     # Collect decisions
     st.subheader("Выберите подходящие интенты:")
@@ -604,7 +712,34 @@ def show_annotation_interface(
                 }}
             }}
 
-            // 3. Arrow Keys
+            // 2b. Escape key — Skip / Unskip
+            if (e.key === 'Escape' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {{
+                if (!isInput) {{
+                    const btns = Array.from(pDoc.querySelectorAll('button'));
+                    const skipBtn = btns.find(b => b.textContent.includes('Пропустить') || b.textContent.includes('Вернуть в работу'));
+                    if (skipBtn) {{
+                        e.preventDefault();
+                        e.stopImmediatePropagation();
+                        skipBtn.click();
+                    }}
+                }}
+            }}
+
+            // 3. Ctrl+Arrow / Cmd+Arrow — prev/next text
+            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {{
+                const btns = Array.from(pDoc.querySelectorAll('button'));
+                const target = e.key === 'ArrowLeft'
+                    ? btns.find(b => b.textContent.includes('⬅'))
+                    : btns.find(b => b.textContent.includes('➡'));
+                if (target && !target.disabled) {{
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    target.click();
+                }}
+                return false;
+            }}
+
+            // 4. Arrow Keys (checkbox navigation)
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {{
                 if (active.type === 'checkbox') {{
                     const cbs = getCBs();
@@ -657,7 +792,7 @@ def show_annotation_interface(
             continue
 
         pct = int(candidate.probability * 100)
-        label_text = f"**{candidate.label}** ({pct}%)"
+        label_text = f"**{candidate.label}** ({pct}%)" if _show_conf else f"**{candidate.label}**"
 
         decision = st.checkbox(
             label_text,
@@ -718,7 +853,7 @@ def show_annotation_interface(
         return min(current_idx + 1, len(all_texts) - 1)
 
     with col1:
-        if st.button("✅ Сохранить", type="primary", width="stretch"):
+        if st.button("✅ Сохранить [Enter]", type="primary", width="stretch"):
             annotation_service.save_annotations(
                 text_id=text_id,
                 annotator=annotator.name,
@@ -736,20 +871,18 @@ def show_annotation_interface(
             st.rerun()
     
     with col2:
-        if st.button("⏭️ Пропустить", width="stretch"):
-            annotation_service.skip_text(text_id, annotator.name)
-            st.info("Текст пропущен")
-            
-            # Jump to next pending text and SCROLL TOP
-            next_idx = find_next_pending_index(st.session_state.current_text_index, all_texts)
-            st.session_state.current_text_index = next_idx
-            st.session_state.scroll_to_top = True
-            st.rerun()
-    
-    
-    with col3:
-        if show_skipped:
-            st.info("Текст пропущен")
+        if is_skipped_status:
+            if st.button("↩️ Вернуть в работу [Esc]", width="stretch"):
+                annotation_service.unskip_text(text_id, annotator.name)
+                st.rerun()
+        else:
+            if st.button("⏭️ Пропустить [Esc]", width="stretch"):
+                annotation_service.skip_text(text_id, annotator.name)
+                # Jump to next pending text
+                next_idx = find_next_pending_index(st.session_state.current_text_index, all_texts)
+                st.session_state.current_text_index = next_idx
+                st.session_state.scroll_to_top = True
+                st.rerun()
 
 
 @st.cache_resource
@@ -771,6 +904,10 @@ def main():
         if "import_done" not in st.session_state:
             handle_import(services, intents)
             st.session_state.import_done = True
+    else:
+        if "import_done" not in st.session_state:
+            logger.info(f"No CSV found at {settings.import_csv_path}, skipping automatic import.")
+            st.session_state.import_done = True
     
     # Authenticate
     auth_service: AuthService = services["auth"]
@@ -783,8 +920,10 @@ def main():
     annotators_repr = "".join(sorted([f"{a.name}:{','.join(sorted(a.intents))}" for a in config.annotators]))
     ensure_assignments(annotators_repr, services["annotation"], auth_service)
     
+    _sync_settings_from_cookies()
+
     annotator = authenticate_user(auth_service)
-    
+
     # Show annotation interface
     annotation_service: AnnotationService = services["annotation"]
     show_annotation_interface(annotator, annotation_service, intents)

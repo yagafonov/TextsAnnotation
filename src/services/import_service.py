@@ -4,7 +4,6 @@ import csv
 import os
 from typing import Dict, List, Optional
 
-from modeling import TopKModelStub
 from src.models.candidate import Candidate
 from src.models.intent import Intent
 from src.repositories.text_repo import TextRepository
@@ -52,14 +51,45 @@ class ImportService:
             return 0
         
         imported_count = 0
-        model = TopKModelStub(intents, top_k=top_k)
-        
+
+        # Initialize assignment state for tie-breaking across all rows in this import
+        import random as _random
+        _rng = _random.Random(42)
+        _running_counts: dict = {}
+        if annotators and annotation_service:
+            from src.utils.database import get_connection as _gc
+            with _gc(self.text_repo.db_path) as _conn:
+                _cnt_rows = _conn.execute(
+                    "SELECT assigned_to, COUNT(*) as cnt FROM texts "
+                    "WHERE assigned_to IS NOT NULL GROUP BY assigned_to"
+                ).fetchall()
+                _running_counts = {r["assigned_to"]: r["cnt"] for r in _cnt_rows}
+            for ann in annotators:
+                _running_counts.setdefault(ann.name, 0)
+
         try:
             with open(csv_path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
+                # Basic delimiter detection
+                first_line = f.readline()
+                f.seek(0)
+                delimiter = ";" if ";" in first_line and first_line.count(";") > first_line.count(",") else ","
+                
+                reader = csv.DictReader(f, delimiter=delimiter)
                 
                 for row in reader:
-                    text = row.get("request_text", "").strip()
+                    # Clean up keys: some CSVs have trailing delimiters in header
+                    # row = {k.strip('; '): v for k, v in row.items() if k is not None}
+                    # Actually, better to just look for our keys in whatever the reader produced
+                    text = None
+                    for key in row.keys():
+                        if key and key.strip(";") in ["text", "request_text"]:
+                            text = row[key]
+                            break
+                    
+                    if text is None:
+                        text = (row.get("text") or row.get("request_text") or "").strip()
+                    else:
+                        text = text.strip()
                     if not text:
                         continue
                     if self.text_repo.exists(text):
@@ -68,11 +98,12 @@ class ImportService:
                     language = self._normalize_language(row.get("language"))
                     clusters = row.get("clusters")
                     
-                    # Generate candidates: read from CSV score columns if present,
-                    # otherwise fall back to model stub
+                    # Read candidate scores from CSV if present.
+                    # If no score columns found, store an empty candidate list
+                    # (real scores must come from an actual NLU model, not from a stub).
                     candidates = self._candidates_from_row(row, intents, probability_threshold)
                     if candidates is None:
-                        candidates = model.predict(text)
+                        candidates = []
                     
                     # Determine assigned cluster from scores or clusters field
                     assigned_cluster = self._determine_cluster(row, intents)
@@ -86,7 +117,10 @@ class ImportService:
                     # Calculate assignment if services provided
                     assigned_to = None
                     if annotators and annotation_service:
-                        assigned_to = annotation_service.calculate_assignment(candidates, annotators, language)
+                        assigned_to = annotation_service.calculate_assignment(
+                            candidates, annotators, language,
+                            running_counts=_running_counts, rng=_rng
+                        )
                     
                     # Create text with candidates
                     self.text_repo.create(
@@ -186,15 +220,15 @@ class ImportService:
         Returns:
             Normalized language code (ru/kk) or original
         """
-        if not lang:
-            return None
+        if not lang or not isinstance(lang, str):
+            return "unknown"
             
-        lang = lang.strip()
+        lang = lang.strip().lower()
         mapping = {
-            "Русский": "ru",
+            "русский": "ru",
             "russian": "ru",
             "ru": "ru",
-            "Казахский": "kk",
+            "казахский": "kk",
             "kazakh": "kk",
             "kz": "kk",
             "kk": "kk"

@@ -8,6 +8,7 @@ import pandas as pd
 
 from src.services.stats_service import StatsService
 from src.models.intent import Intent
+from src.models.candidate import Candidate
 
 
 class TestStatsServiceOverall:
@@ -64,6 +65,74 @@ class TestStatsServiceOverall:
         assert df['total_annotators'].iloc[0] == 1
         assert df['total_annotations'].iloc[0] == 4  # 2 texts * 2 decisions
         assert df['positive_annotations'].iloc[0] == 2  # 2 'yes' decisions
+        assert df['fully_annotated_texts'].iloc[0] == 2
+        assert df['texts_with_extra_intents'].iloc[0] == 0
+
+class TestStatsServiceActivity:
+    """Tests for activity metrics."""
+    
+    def test_get_daily_activity(self, temp_db, text_repo, annotation_repo):
+        """Test daily activity tracking."""
+        # Arrange
+        text_id = text_repo.create(
+            text="Test", 
+            language="ru",
+            clusters="c1",
+            assigned_cluster="c1",
+            data_version=1,
+            candidates=[],
+            model_version=1
+        )
+        annotation_repo.save_annotations(
+            text_id=text_id,
+            annotator="user1",
+            decisions={"intent_a": "yes"},
+            candidate_labels=["intent_a"],
+            extra_labels=[],
+            shown_intents_source={"intent_a": "candidate"}
+        )
+        
+        service = StatsService(temp_db)
+        
+        # Act
+        df = service.get_daily_activity()
+        
+        # Assert
+        assert len(df) == 1
+        assert 'date' in df.columns
+        assert df['annotator'].iloc[0] == 'user1'
+        assert df['count'].iloc[0] == 1
+
+    def test_get_hourly_activity(self, temp_db, text_repo, annotation_repo):
+        """Test hourly activity tracking."""
+        # Arrange
+        text_id = text_repo.create(
+            text="Test", 
+            language="ru",
+            clusters="c1",
+            assigned_cluster="c1",
+            data_version=1,
+            candidates=[],
+            model_version=1
+        )
+        annotation_repo.save_annotations(
+            text_id=text_id,
+            annotator="user1",
+            decisions={"intent_a": "yes"},
+            candidate_labels=["intent_a"],
+            extra_labels=[],
+            shown_intents_source={"intent_a": "candidate"}
+        )
+        
+        service = StatsService(temp_db)
+        
+        # Act
+        df = service.get_hourly_activity()
+        
+        # Assert
+        assert len(df) == 1
+        assert 'hour' in df.columns
+        assert df['count'].iloc[0] == 1
 
 
 class TestStatsServiceAnnotators:
@@ -200,6 +269,38 @@ class TestStatsServiceIntentQuality:
         labels = df['label'].tolist()
         assert 'intent_a' in labels
         assert 'intent_b' in labels
+
+    def test_get_model_quality_legacy(self, temp_db, text_repo, annotation_repo, intent_repo):
+        """Test legacy model quality metrics."""
+        # Arrange
+        intent_repo.upsert(Intent(label="intent_a", cluster="cluster1", source_file="test.yaml"))
+        text_id = text_repo.create(
+            text="Test", 
+            language="ru", 
+            clusters="c1",
+            assigned_cluster="c1",
+            data_version=1,
+            candidates=[Candidate(label="intent_a", rank=1, probability=0.9)],
+            model_version=1
+        )
+        annotation_repo.save_annotations(
+            text_id=text_id,
+            annotator="user1",
+            decisions={"intent_a": "yes"},
+            candidate_labels=["intent_a"],
+            extra_labels=[],
+            shown_intents_source={"intent_a": "candidate"}
+        )
+        
+        service = StatsService(temp_db)
+        
+        # Act
+        df = service.get_model_quality_legacy()
+        
+        # Assert
+        assert len(df) >= 1
+        assert 'top1_precision' in df.columns
+        assert df[df['label'] == 'intent_a']['top1_yes'].iloc[0] == 1
 
 
 class TestStatsServiceClusterProgress:
@@ -441,3 +542,147 @@ class TestStatsServiceExport:
 
 # Import os for path checks
 import os
+
+class TestStatsServiceOverview:
+    """Tests for detailed text overview."""
+    
+    def test_get_text_detailed_overview(self, temp_db, text_repo, annotation_repo):
+        """Test text overview with various filters."""
+        # Arrange
+        text_id = text_repo.create(
+            text="Detailed search text",
+            language="ru",
+            clusters="c1",
+            assigned_cluster="c1",
+            data_version=1,
+            assigned_to="user1",
+            candidates=[Candidate(label="intent_a", rank=1, probability=0.9)],
+            model_version=1
+        )
+        annotation_repo.save_annotations(
+            text_id=text_id,
+            annotator="user1",
+            decisions={"intent_a": "yes"},
+            candidate_labels=["intent_a"],
+            extra_labels=[],
+            shown_intents_source={"intent_a": "candidate"}
+        )
+        
+        service = StatsService(temp_db)
+        
+        # Act: Get text detailed overview with multiple filters
+        df_annotated = service.get_text_detailed_overview(is_annotated=True)
+        df_unannotated = service.get_text_detailed_overview(is_annotated=False)
+        df_intent = service.get_text_detailed_overview(top5_intents=["intent_a"])
+        df_annotator = service.get_text_detailed_overview(assigned_annotators=["user1"])
+        df_search = service.get_text_detailed_overview(search_query="search")
+        
+        # Assert
+        assert len(df_annotated) == 1
+        assert len(df_unannotated) == 0
+        assert len(df_intent) == 1
+        assert len(df_annotator) == 1
+        assert len(df_search) == 1
+
+    def test_get_text_count(self, temp_db, text_repo):
+        """Test text counting with filters."""
+        # Arrange
+        text_repo.create(
+            text="Count me", 
+            language="ru",
+            clusters="c1",
+            assigned_cluster="c1",
+            data_version=1,
+            candidates=[],
+            model_version=1
+        )
+        
+        service = StatsService(temp_db)
+        
+        # Act
+        count = service.get_text_count(search_query="Count")
+        
+        # Assert
+        assert count == 1
+
+    def test_get_all_intents(self, temp_db, intent_repo):
+        """Test getting all intent labels."""
+        # Arrange
+        intent_repo.upsert(Intent(label="intent_z", cluster="c", source_file="s"))
+        
+        service = StatsService(temp_db)
+        
+        # Act
+        intents = service.get_all_intents()
+        
+        # Assert
+        assert "intent_z" in intents
+
+    def test_get_unique_assigned_annotators(self, temp_db, text_repo):
+        """Test getting unique assigned annotators."""
+        # Arrange
+        text_repo.create(
+            text="T1", 
+            language="ru", 
+            assigned_to="annotator_x",
+            clusters="c1",
+            assigned_cluster="c1",
+            data_version=1,
+            candidates=[],
+            model_version=1
+        )
+        
+        service = StatsService(temp_db)
+        
+        # Act
+        annotators = service.get_unique_assigned_annotators()
+        
+        # Assert
+        assert "annotator_x" in annotators
+
+    def test_get_text_detailed_overview_extra_filters(self, temp_db, text_repo, annotation_repo):
+        """Test detailed overview with human intents and disagreements."""
+        # Arrange
+        text_id = text_repo.create(
+            text="Human intent test",
+            language="ru",
+            clusters="c1",
+            assigned_cluster="c1",
+            data_version=1,
+            candidates=[Candidate(label="intent_a", rank=1, probability=0.9)],
+            model_version=1
+        )
+        annotation_repo.save_annotations(
+            text_id=text_id,
+            annotator="user1",
+            decisions={"intent_a": "yes"},
+            candidate_labels=["intent_a"],
+            extra_labels=[],
+            shown_intents_source={"intent_a": "candidate"}
+        )
+        annotation_repo.save_annotations(
+            text_id=text_id,
+            annotator="user2",
+            decisions={"intent_a": "no"},  # Disagreement here
+            candidate_labels=["intent_a"],
+            extra_labels=[],
+            shown_intents_source={"intent_a": "candidate"}
+        )
+        
+        service = StatsService(temp_db)
+        
+        # Act
+        df_human = service.get_text_detailed_overview(human_intents=["intent_a"])
+        df_disagree = service.get_text_detailed_overview(only_disagreements=True)
+        
+        # Assert
+        assert len(df_human) == 1
+        assert len(df_disagree) == 1
+
+    def test_get_cluster_progress_filtered(self, temp_db, text_repo):
+        """Test cluster progress with filters."""
+        text_repo.create(text="T1", language="ru", clusters="c1", assigned_cluster="c1", data_version=1, candidates=[], model_version=1)
+        
+        service = StatsService(temp_db)
+        df = service.get_cluster_progress()
+        assert len(df) >= 1

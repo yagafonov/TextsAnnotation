@@ -79,7 +79,7 @@ class AnnotationRepository(BaseRepository):
     
     def skip_text(self, text_id: int, annotator: str) -> None:
         """Mark a text as skipped by annotator.
-        
+
         Args:
             text_id: Text ID
             annotator: Annotator name
@@ -92,12 +92,13 @@ class AnnotationRepository(BaseRepository):
                 """,
                 (text_id, annotator, datetime.now(timezone.utc).isoformat())
             )
+            conn.execute("UPDATE texts SET is_skipped = 1 WHERE id = ?", (text_id,))
             conn.commit()
             logger.info(f"Text#{text_id} skipped by {annotator}")
-    
+
     def unskip_text(self, text_id: int, annotator: str) -> None:
         """Remove skip mark from a text.
-        
+
         Args:
             text_id: Text ID
             annotator: Annotator name
@@ -107,6 +108,7 @@ class AnnotationRepository(BaseRepository):
                 "DELETE FROM skipped_texts WHERE text_id = ? AND annotator = ?",
                 (text_id, annotator)
             )
+            conn.execute("UPDATE texts SET is_skipped = 0 WHERE id = ?", (text_id,))
             conn.commit()
             logger.info(f"Text#{text_id} unskipped by {annotator}")
     
@@ -158,8 +160,8 @@ class AnnotationRepository(BaseRepository):
         """
         with get_connection(self.db_path) as conn:
             # Total texts
-            total_query = "SELECT COUNT(*) as cnt FROM texts t WHERE 1=1"
-            total_params = []
+            total_query = "SELECT COUNT(*) as cnt FROM texts t WHERE t.assigned_to = ?"
+            total_params = [annotator]
             
             if clusters:
                 placeholders = ", ".join("?" for _ in clusters)
@@ -182,9 +184,9 @@ class AnnotationRepository(BaseRepository):
                 SELECT COUNT(DISTINCT t.id) as cnt
                 FROM texts t
                 INNER JOIN annotations a ON a.text_id = t.id AND a.annotator = ?
-                WHERE 1=1
+                WHERE t.assigned_to = ?
             """
-            done_params = [annotator]
+            done_params = [annotator, annotator]
             
             if clusters:
                 placeholders = ", ".join("?" for _ in clusters)

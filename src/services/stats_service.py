@@ -82,23 +82,56 @@ class StatsService(BaseRepository):
     
     def get_annotator_stats(self) -> pd.DataFrame:
         """Get per-annotator statistics.
-        
+
         Returns:
             DataFrame with annotator stats
         """
         query = """
-            SELECT 
-                a.annotator,
-                COUNT(DISTINCT a.text_id) as texts_annotated,
-                COUNT(a.id) as total_decisions,
-                SUM(CASE WHEN a.decision = 'yes' THEN 1 ELSE 0 END) as yes_count,
-                SUM(CASE WHEN a.decision = 'no' THEN 1 ELSE 0 END) as no_count,
-                AVG(CASE WHEN a.decision = 'yes' THEN 1.0 ELSE 0.0 END) as yes_rate
-            FROM annotations a
-            GROUP BY a.annotator
-            ORDER BY texts_annotated DESC
+            WITH assigned AS (
+                SELECT assigned_to AS annotator,
+                       COUNT(*) AS texts_assigned
+                FROM texts
+                WHERE assigned_to IS NOT NULL AND assigned_to != ''
+                GROUP BY assigned_to
+            ),
+            annotated AS (
+                SELECT a.annotator,
+                       COUNT(DISTINCT a.text_id) AS texts_annotated,
+                       COUNT(a.id) AS total_decisions,
+                       SUM(CASE WHEN a.decision = 'yes' THEN 1 ELSE 0 END) AS yes_count,
+                       SUM(CASE WHEN a.decision = 'no' THEN 1 ELSE 0 END) AS no_count,
+                       AVG(CASE WHEN a.decision = 'yes' THEN 1.0 ELSE 0.0 END) AS yes_rate
+                FROM annotations a
+                GROUP BY a.annotator
+            )
+            SELECT
+                COALESCE(asgn.annotator, ann.annotator) AS annotator,
+                COALESCE(asgn.texts_assigned, 0) AS texts_assigned,
+                COALESCE(ann.texts_annotated, 0) AS texts_annotated,
+                CASE WHEN COALESCE(asgn.texts_assigned, 0) > 0
+                     THEN CAST(COALESCE(ann.texts_annotated, 0) AS REAL) / asgn.texts_assigned
+                     ELSE 0.0 END AS annotated_pct,
+                COALESCE(ann.total_decisions, 0) AS total_decisions,
+                COALESCE(ann.yes_count, 0) AS yes_count,
+                COALESCE(ann.no_count, 0) AS no_count,
+                COALESCE(ann.yes_rate, 0.0) AS yes_rate
+            FROM assigned asgn
+            LEFT JOIN annotated ann ON asgn.annotator = ann.annotator
+            UNION ALL
+            SELECT
+                ann.annotator,
+                0 AS texts_assigned,
+                ann.texts_annotated,
+                0.0 AS annotated_pct,
+                ann.total_decisions,
+                ann.yes_count,
+                ann.no_count,
+                ann.yes_rate
+            FROM annotated ann
+            WHERE ann.annotator NOT IN (SELECT annotator FROM assigned)
+            ORDER BY texts_assigned DESC, texts_annotated DESC
         """
-        
+
         with get_connection(self.db_path) as conn:
             return pd.read_sql_query(query, conn)
     
@@ -380,26 +413,13 @@ class StatsService(BaseRepository):
         top5_intents: List[str] = None,
         human_intents: List[str] = None,
         assigned_annotators: List[str] = None,
+        languages: List[str] = None,
         is_annotated: Optional[bool] = None,
         only_disagreements: bool = False,
         limit: Optional[int] = 100,
         offset: int = 0
     ) -> pd.DataFrame:
-        """Get detailed text overview with candidates and annotations.
-        
-        Args:
-            search_query: Text to search in requests
-            top5_intents: Filter by intents present in Top-5
-            human_intents: Filter by intents chosen by humans
-            assigned_annotators: Filter by assigned annotators
-            is_annotated: Filter by annotation status
-            only_disagreements: Filter to show only disagreements
-            limit: Pagination limit
-            offset: Pagination offset
-            
-        Returns:
-            DataFrame with detailed text info
-        """
+        """Get detailed text overview with candidates and annotations."""
         where_clauses = ["1=1"]
         params = []
         
@@ -424,10 +444,23 @@ class StatsService(BaseRepository):
             params.extend(human_intents)
 
         if assigned_annotators:
-            placeholders = ", ".join(["?"] * len(assigned_annotators))
-            where_clauses.append(f"t.assigned_to IN ({placeholders})")
-            params.extend(assigned_annotators)
-            
+            named = [a for a in assigned_annotators if a != "[Unassigned]"]
+            include_null = "[Unassigned]" in assigned_annotators
+            parts = []
+            if named:
+                placeholders = ", ".join(["?"] * len(named))
+                parts.append(f"t.assigned_to IN ({placeholders})")
+                params.extend(named)
+            if include_null:
+                parts.append("t.assigned_to IS NULL")
+            if parts:
+                where_clauses.append(f"({' OR '.join(parts)})")
+
+        if languages:
+            placeholders = ", ".join(["?"] * len(languages))
+            where_clauses.append(f"t.language IN ({placeholders})")
+            params.extend(languages)
+
         if only_disagreements:
             where_clauses.append("""
                 EXISTS (
@@ -439,10 +472,9 @@ class StatsService(BaseRepository):
                        AND SUM(CASE WHEN a3.decision = 'no' THEN 1 ELSE 0 END) > 0
                 )
             """)
-            
+
         where_sql = " AND ".join(where_clauses)
-        
-        # Base query to get text IDs and core info
+
         base_query = f"""
             SELECT 
                 t.id, 
@@ -523,14 +555,11 @@ class StatsService(BaseRepository):
         top5_intents: List[str] = None,
         human_intents: List[str] = None,
         assigned_annotators: List[str] = None,
+        languages: List[str] = None,
         is_annotated: Optional[bool] = None,
         only_disagreements: bool = False
     ) -> int:
-        """Get count of texts matching filters.
-        
-        Returns:
-            Count of texts
-        """
+        """Get count of texts matching filters."""
         where_clauses = ["1=1"]
         params = []
         
@@ -560,9 +589,22 @@ class StatsService(BaseRepository):
             params.extend(human_intents)
 
         if assigned_annotators:
-            placeholders = ", ".join(["?"] * len(assigned_annotators))
-            where_clauses.append(f"t.assigned_to IN ({placeholders})")
-            params.extend(assigned_annotators)
+            named = [a for a in assigned_annotators if a != "[Unassigned]"]
+            include_null = "[Unassigned]" in assigned_annotators
+            parts = []
+            if named:
+                placeholders = ", ".join(["?"] * len(named))
+                parts.append(f"t.assigned_to IN ({placeholders})")
+                params.extend(named)
+            if include_null:
+                parts.append("t.assigned_to IS NULL")
+            if parts:
+                where_clauses.append(f"({' OR '.join(parts)})")
+
+        if languages:
+            placeholders = ", ".join(["?"] * len(languages))
+            where_clauses.append(f"t.language IN ({placeholders})")
+            params.extend(languages)
             
         if only_disagreements:
             where_clauses.append("""
@@ -594,11 +636,13 @@ class StatsService(BaseRepository):
             return [row['label'] for row in rows]
 
     def get_unique_assigned_annotators(self) -> List[str]:
-        """Get list of all unique assigned annotators.
-        
-        Returns:
-            List of annotator names
-        """
+        """Get list of all unique assigned annotators."""
         with get_connection(self.db_path) as conn:
             rows = conn.execute("SELECT DISTINCT assigned_to FROM texts WHERE assigned_to IS NOT NULL AND assigned_to != '' ORDER BY assigned_to").fetchall()
             return [row['assigned_to'] for row in rows]
+
+    def get_unique_languages(self) -> List[str]:
+        """Get list of all unique languages in the texts table."""
+        with get_connection(self.db_path) as conn:
+            rows = conn.execute("SELECT DISTINCT language FROM texts WHERE language IS NOT NULL AND language != '' ORDER BY language").fetchall()
+            return [row['language'] for row in rows]

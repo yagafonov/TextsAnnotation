@@ -76,7 +76,8 @@ class TestCompleteAnnotationWorkflow:
             assigned_cluster="cluster1",
             data_version=1,
             candidates=[],
-            model_version=1
+            model_version=1,
+            assigned_to="annotator1"
         )
         
         # Step 4: Authenticate first user
@@ -221,19 +222,19 @@ class TestImportToAnnotationWorkflow:
             assert next_text is not None
             assert next_text['text'] == 'Imported text for annotation'
             
-            # Step 6: Get candidates (should be generated during import)
+            # Step 6: Get candidates - empty because the test CSV has no score columns.
+            # Real confidence scores must come from an actual NLU model.
             text, candidates = annotation_service.get_text_with_candidates(next_text['id'])
             assert text is not None
-            assert len(candidates) > 0
             
-            # Step 7: Annotate the imported text
+            # Step 7: Annotate the imported text (using known intent directly)
             annotation_service.save_annotations(
                 text_id=next_text['id'],
                 annotator='test_user',
                 decisions={'intent_a': 'yes'},
-                candidate_labels=[c.label for c in candidates],
+                candidate_labels=['intent_a'],
                 extra_labels=[],
-                shown_intents_source={c.label: 'candidate' for c in candidates}
+                shown_intents_source={'intent_a': 'candidate'}
             )
             
             # Step 8: Verify annotation was saved

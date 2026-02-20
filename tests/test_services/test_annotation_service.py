@@ -8,6 +8,7 @@ import pytest
 
 from src.services.annotation_service import AnnotationService
 from src.models.candidate import Candidate
+from src.models.annotator import Annotator
 
 
 class TestAnnotationServiceGetNextText:
@@ -36,7 +37,7 @@ class TestAnnotationServiceGetNextText:
         
         # Assert: Text is returned
         assert next_text is not None
-        assert next_text["request_text"] == "Test annotation text"
+        assert next_text["text"] == "Test annotation text"
         assert next_text["language"] == "ru"
     
     def test_get_next_text_filters_by_cluster(self, temp_db, text_repo):
@@ -94,7 +95,7 @@ class TestAnnotationServiceGetNextText:
             candidates=[],
             model_version=1
         )
-        
+
         # Act: Get text for Russian language only
         service = AnnotationService(temp_db)
         next_text = service.get_next_text(
@@ -364,7 +365,8 @@ class TestAnnotationServiceProgress:
                 assigned_cluster="cluster1",
                 data_version=1,
                 candidates=[],
-                model_version=1
+                model_version=1,
+                assigned_to="user1"
             )
             text_ids.append(text_id)
         
@@ -390,3 +392,145 @@ class TestAnnotationServiceProgress:
         # Assert: Progress is correct
         assert progress["total"] == 5
         assert progress["done"] == 3
+
+
+class TestAnnotationServiceAssignment:
+    """Tests for annotator assignment logic."""
+    
+    @pytest.fixture
+    def service_with_mocks(self):
+        """Service with mocked intent repository."""
+        from unittest.mock import MagicMock
+        service = AnnotationService(":memory:")
+        service.intent_repo = MagicMock()
+        return service
+
+    def test_calculate_assignment_formula(self, service_with_mocks):
+        """Test calculating assignment based on the new weighted formula."""
+        from src.models.intent import Intent
+        
+        service = service_with_mocks
+        service.intent_repo.get_all.return_value = {
+            "intent_a": Intent(label="intent_a", cluster="cluster1"),
+            "intent_b": Intent(label="intent_b", cluster="cluster2")
+        }
+        
+        candidates = [
+            Candidate(label="intent_a", rank=1, probability=0.8),
+            Candidate(label="intent_b", rank=2, probability=0.5)
+        ]
+        
+        annotators = [
+            Annotator(name="user_ru_a", password="p", language="ru", intents=["intent_a"]),
+            Annotator(name="user_ru_ab", password="p", language="ru", intents=["intent_a", "intent_b"]),
+            Annotator(name="user_kz_ab", password="p", language="kz", intents=["intent_a", "intent_b"])
+        ]
+        
+        # 1. Russian text
+        # user_ru_a score: 0.8
+        # user_ru_ab score: 0.8 + 0.5 = 1.3
+        # user_kz_ab score: 0 (language mismatch)
+        assigned = service.calculate_assignment(candidates, annotators, "ru")
+        assert assigned == "user_ru_ab"
+        
+        # 2. Kazakh text
+        # Only user_kz_ab matches language
+        assigned_kz = service.calculate_assignment(candidates, annotators, "kz")
+        assert assigned_kz == "user_kz_ab"
+
+    def test_calculate_assignment_cluster_match(self, service_with_mocks):
+        """Test that cluster matching works as part of the formula."""
+        from src.models.intent import Intent
+        
+        service = service_with_mocks
+        service.intent_repo.get_all.return_value = {
+            "intent_a": Intent(label="intent_a", cluster="cluster1")
+        }
+        
+        candidates = [Candidate(label="intent_a", rank=1, probability=0.9)]
+        annotators = [
+            Annotator(name="user_cluster", password="p", language="ru", clusters=["cluster1"]),
+            Annotator(name="user_intent", password="p", language="ru", intents=["intent_a"])
+        ]
+        
+        # Both should match, but if scores are equal, the first one in loop might win 
+        # (Current implementation picks the first one that BEATS max_score)
+        assigned = service.calculate_assignment(candidates, annotators, "ru")
+        assert assigned in ["user_cluster", "user_intent"]
+
+    def test_calculate_assignment_low_confidence(self, service_with_mocks):
+        """Test that low confidence intents ARE now included (no threshold)."""
+        from src.models.intent import Intent
+        
+        service = service_with_mocks
+        service.intent_repo.get_all.return_value = {
+            "intent_a": Intent(label="intent_a", cluster="c1")
+        }
+        
+        annotators = [Annotator(name="user1", password="p", language="ru", intents=["intent_a"])]
+        
+        # Previously ignored (below 0.4), now should be assigned
+        assert service.calculate_assignment(
+            [Candidate(label="intent_a", rank=1, probability=0.1)],
+            annotators, "ru"
+        ) == "user1"
+
+    def test_assign_unannotated_texts_integration(self, temp_db, text_repo):
+        """Test bulk re-assignment of unannotated texts (integration)."""
+        # Note: AnnotationService(temp_db) will use real IntentRepository
+        # We need to make sure the intent exists in the DB or mocked files
+        # For simplicity, we can rely on the fact that AnnotationService 
+        # uses the repo we initialized in the constructor.
+        
+        text_id = text_repo.create(
+            text="Assignment test",
+            language="ru",
+            clusters="c1",
+            assigned_cluster="c1",
+            data_version=1,
+            candidates=[Candidate(label="intent_a", rank=1, probability=0.9)],
+            model_version=1
+        )
+        
+        annotators = [
+            Annotator(name="user_a", password="p", language="ru", intents=["intent_a"])
+        ]
+        
+        service = AnnotationService(temp_db)
+        # Mock the mapping to avoid needing real files in data/intents
+        service._intent_to_cluster = {"intent_a": "c1"}
+        
+        # Act
+        count = service.assign_unannotated_texts(annotators)
+        
+        # Assert
+        assert count == 1
+        updated_text = text_repo.get_by_id(text_id)
+        assert updated_text.assigned_to == "user_a"
+
+
+class TestAnnotationServiceNavigation:
+    """Tests for text navigation and caching."""
+    
+    def test_get_all_texts(self, temp_db, text_repo):
+        """Test getting all texts for an annotator."""
+        # Arrange
+        text_repo.create(
+            text="Nav test",
+            language="ru",
+            clusters="c1",
+            assigned_cluster="c1",
+            data_version=1,
+            candidates=[],
+            model_version=1,
+            assigned_to="user1"
+        )
+        
+        service = AnnotationService(temp_db)
+        
+        # Act
+        texts = service.get_all_texts(annotator="user1")
+        
+        # Assert
+        assert len(texts) >= 1
+        assert texts[0]["text"] == "Nav test"

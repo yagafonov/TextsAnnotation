@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class Annotator(BaseModel):
@@ -14,14 +14,28 @@ class Annotator(BaseModel):
     clusters: List[str] = Field(default_factory=list, description="Allowed clusters for this annotator")
     intents: List[str] = Field(default_factory=list, description="Preferred intents for assignment")
     
-    @validator("language", pre=True)
+    @field_validator("language", mode="before")
+    @classmethod
     def normalize_language(cls, v):
-        """Normalize language to lowercase."""
+        """Normalize language to ISO code.
+        
+        Accepts both ISO codes ('ru', 'kk') and display names
+        ('Русский', 'Казахский') for backwards compatibility.
+        """
+        _DISPLAY_TO_CODE = {
+            "русский": "ru",
+            "казахский": "kk",
+            "узбекский": "uz",
+            "english": "en",
+            "английский": "en",
+        }
         if isinstance(v, str):
-            return v.strip().lower()
+            lowered = v.strip().lower()
+            return _DISPLAY_TO_CODE.get(lowered, lowered)
         return v
     
-    @validator("clusters", pre=True)
+    @field_validator("clusters", mode="before")
+    @classmethod
     def normalize_clusters(cls, v):
         """Normalize clusters from various input formats."""
         if isinstance(v, str):
@@ -31,8 +45,8 @@ class Annotator(BaseModel):
             return [str(item).strip() for item in v if str(item).strip()]
         return []
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "annotator1",
                 "password": "secure_password",
@@ -40,6 +54,7 @@ class Annotator(BaseModel):
                 "clusters": ["general_rus", "card_products_rus"]
             }
         }
+    )
 
 
 class AnnotatorConfig(BaseModel):

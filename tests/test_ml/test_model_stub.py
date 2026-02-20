@@ -122,7 +122,7 @@ class TestTopKModelStub:
         assert len(candidates) == len(sample_intents)
     
     def test_top_k_zero(self):
-        """Test edge case of top_k=0."""
+        """Test edge case of top_k=0: returns all intents."""
         # Arrange
         intents = {'intent_a': Intent(label='intent_a', cluster='c1', source_file='test.yaml')}
         model = TopKModelStub(intents, top_k=0, seed=42)
@@ -130,8 +130,8 @@ class TestTopKModelStub:
         # Act
         candidates = model.predict("Test text")
         
-        # Assert: Returns empty list
-        assert len(candidates) == 0
+        # Assert: top_k=0 means "return all" (same behavior as None)
+        assert len(candidates) == len(intents)
     
     def test_predict_all_labels_from_intents(self, sample_intents):
         """Test that all candidate labels come from provided intents."""

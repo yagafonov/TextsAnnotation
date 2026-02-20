@@ -153,11 +153,12 @@ def init_database(db_path: str) -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS texts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                text TEXT NOT NULL,
+                text TEXT NOT NULL UNIQUE,
                 language TEXT,
                 clusters TEXT,
                 assigned_cluster TEXT,
                 assigned_to TEXT,
+                is_skipped INTEGER NOT NULL DEFAULT 0,
                 data_version INTEGER NOT NULL,
                 created_at TEXT NOT NULL
             )
@@ -251,14 +252,21 @@ def init_database(db_path: str) -> None:
         """)
         
         # Schema Migrations (Compatibility with legacy dumps)
-        logger.info("Checking for schema migrations")
+        logger.debug("Checking for schema migrations")
         migration_applied = False
         try:
             # Table 'texts' migrations
             if ensure_column(conn, "texts", "assigned_cluster", "TEXT"): migration_applied = True
             if ensure_column(conn, "texts", "language", "TEXT"): migration_applied = True
             if ensure_column(conn, "texts", "assigned_to", "TEXT"): migration_applied = True
-            
+            if ensure_column(conn, "texts", "is_skipped", "INTEGER NOT NULL DEFAULT 0"): migration_applied = True
+
+            # Backfill is_skipped from skipped_texts table
+            conn.execute("""
+                UPDATE texts SET is_skipped = 1
+                WHERE is_skipped = 0 AND id IN (SELECT text_id FROM skipped_texts)
+            """)
+
             if migration_applied:
                 logger.info("Schema migration applied. Incrementing data version.")
                 current_v_row = conn.execute("SELECT value FROM settings WHERE key = 'current_data_version'").fetchone()
@@ -272,9 +280,46 @@ def init_database(db_path: str) -> None:
             logger.critical(f"DATABASE MIGRATION FAILED: {e}")
             raise RuntimeError(f"Database migration failed. Manual intervention may be required: {e}")
 
-        # Performance indexes
-        logger.info("Creating performance indexes")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_texts_text ON texts(text)")
+        # Performance and Integrity indexes
+        logger.debug("Creating performance and integrity indexes")
+        
+        # Optimization: Only clean up and create unique index if it doesn't exist
+        # This prevents scanning millions of rows on every Streamlit reload.
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_texts_text_unique'")
+        index_exists = cursor.fetchone() is not None
+        
+        if not index_exists:
+            # Proactive Cleanup: Remove duplicate texts before creating UNIQUE index
+            # This handles legacy dumps or "dirty" restores.
+            try:
+                with conn:
+                    # Find duplicates and remove them (keep oldest ID)
+                    duplicate_ids_query = """
+                        SELECT id FROM texts 
+                        WHERE id NOT IN (
+                            SELECT MIN(id) FROM texts GROUP BY text
+                        )
+                    """
+                    cursor = conn.execute(duplicate_ids_query)
+                    duplicate_ids = [row["id"] for row in cursor.fetchall()]
+                    
+                    if duplicate_ids:
+                        logger.info(f"Found {len(duplicate_ids)} duplicate texts. Cleaning up before enforcing UNIQUE constraint.")
+                        # Remove linked records first to maintain consistency
+                        placeholders = ", ".join("?" for _ in duplicate_ids)
+                        conn.execute(f"DELETE FROM candidates WHERE text_id IN ({placeholders})", duplicate_ids)
+                        conn.execute(f"DELETE FROM annotations WHERE text_id IN ({placeholders})", duplicate_ids)
+                        conn.execute(f"DELETE FROM skipped_texts WHERE text_id IN ({placeholders})", duplicate_ids)
+                        conn.execute(f"DELETE FROM shown_intents WHERE text_id IN ({placeholders})", duplicate_ids)
+                        conn.execute(f"DELETE FROM texts WHERE id IN ({placeholders})", duplicate_ids)
+                        logger.info("Duplicate cleanup completed.")
+
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_texts_text_unique ON texts(text)")
+            except sqlite3.IntegrityError as e:
+                logger.warning(f"Could not enforce UNIQUE constraint on texts(text): {e}")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_texts_text ON texts(text)")
+        
+        logger.debug("Creating other performance indexes")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_texts_assigned_to ON texts(assigned_to)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_texts_assigned_cluster ON texts(assigned_cluster)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_texts_language ON texts(language)")
@@ -300,4 +345,4 @@ def init_database(db_path: str) -> None:
         
         conn.commit()
     
-    logger.info("Database initialized successfully")
+    logger.debug("Database initialized successfully")

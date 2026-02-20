@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class Intent(BaseModel):
@@ -15,8 +15,8 @@ class Intent(BaseModel):
     cluster: str = Field(default="unknown", description="Intent cluster/category")
     source_file: Optional[str] = Field(default=None, description="Source YAML file")
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "label": "transfer_money",
                 "description": "User wants to transfer money",
@@ -25,6 +25,7 @@ class Intent(BaseModel):
                 "cluster": "transactions"
             }
         }
+    )
 
 
 class IntentDatabase(BaseModel):

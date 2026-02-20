@@ -8,7 +8,7 @@ import altair as alt
 import extra_streamlit_components as stx
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -18,16 +18,51 @@ from src.services.annotation_service import AnnotationService
 from src.services.auth_service import AuthService
 from src.services.import_service import ImportService
 from src.services.stats_service import StatsService
-from src.utils.config import settings
+from src.utils.config import settings, LANGUAGE_NAMES
 from src.utils.database import get_connection, init_database
 
 # Admin password
 ADMIN_PASSWORD = os.environ.get("TEXTS_ADMIN_PASSWORD", "admin123")
 
-st.set_page_config(page_title="Admin Dashboard", layout="wide", page_icon="📊")
+# Read layout preference from query params
+_layout_pref = st.query_params.get("layout", "wide")
+if _layout_pref not in ("wide", "centered"):
+    _layout_pref = "wide"
 
-# Initialize cookie manager (must be unique key if multiple on same page, but here it's separate page)
-# However, stx.CookieManager key defaults to "init".
+st.set_page_config(page_title="Admin Dashboard", layout=_layout_pref, page_icon="📊")
+
+# Dark theme CSS
+DARK_THEME_CSS = """
+<style>
+    :root {
+        --primary-color: #ff4b4b;
+        --background-color: #0e1117;
+        --secondary-background-color: #262730;
+        --text-color: #fafafa;
+        color-scheme: dark;
+    }
+    .stApp, [data-testid="stAppViewContainer"] { background-color: #0e1117; color: #fafafa; }
+    [data-testid="stSidebar"] { background-color: #262730; }
+    [data-testid="stHeader"] { background-color: #0e1117; }
+    [data-testid="stSidebar"] [data-testid="stMarkdown"],
+    [data-testid="stSidebar"] label { color: #fafafa; }
+    .stSelectbox [data-baseweb="select"],
+    .stMultiSelect [data-baseweb="select"] { background-color: #262730; }
+    .stTextInput input, .stTextArea textarea, .stNumberInput input {
+        background-color: #262730; color: #fafafa; border-color: #4a4a5a;
+    }
+    hr { border-color: #4a4a5a; }
+    [data-testid="stMetricValue"], [data-testid="stMetricLabel"] { color: #fafafa; }
+    [data-testid="stExpander"] { border-color: #4a4a5a; }
+    .stDataFrame, .stTable { color: #fafafa; }
+    div[data-baseweb="popover"] ul { background-color: #262730; }
+    div[data-baseweb="popover"] li:hover { background-color: #3a3a4a; }
+</style>
+"""
+
+if st.query_params.get("dark") == "1":
+    st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
+
 cookie_manager = stx.CookieManager(key="admin_cookies")
 
 
@@ -175,7 +210,7 @@ def show_overall_stats(stats_service: StatsService):
                 "missed_opportunity_count": "Факт. пропусков",
                 "missed_rate": st.column_config.NumberColumn("Missed Rate", format="%.1f%%")
             },
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
 
@@ -203,7 +238,7 @@ def show_overall_stats(stats_service: StatsService):
                         "top1_count": "Top-1 раз",
                         "disagreement_rate": st.column_config.NumberColumn("Disagreement Rate", format="%.1f%%")
                     },
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True
                 )
 
@@ -229,7 +264,7 @@ def show_overall_stats(stats_service: StatsService):
                         "missed_opportunity_count": "Пропущено",
                         "potential_count": "Потенциал"
                     },
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True
                 )
     else:
@@ -249,17 +284,24 @@ def show_annotator_stats(stats_service: StatsService):
     if not df.empty:
         # Format percentages
         df['yes_rate'] = df['yes_rate'].apply(lambda x: f"{x*100:.1f}%")
-        
+        df['annotated_pct'] = df['annotated_pct'].apply(lambda x: f"{x*100:.1f}%")
+
         st.dataframe(
             df,
             column_config={
                 "annotator": "Разметчик",
+                "texts_assigned": "Назначено текстов",
                 "texts_annotated": "Размечено текстов",
+                "annotated_pct": "% Размечено",
                 "total_decisions": "Всего решений",
                 "yes_count": "Да",
                 "no_count": "Нет",
                 "yes_rate": "% Да"
             },
+            column_order=[
+                "annotator", "texts_assigned", "texts_annotated", "annotated_pct",
+                "total_decisions", "yes_count", "no_count", "yes_rate"
+            ],
             hide_index=True,
             width="stretch"
         )
@@ -279,7 +321,7 @@ def show_annotator_stats(stats_service: StatsService):
             color=alt.Color('annotator:N', title='Разметчик'),
             tooltip=['date', 'annotator', 'count']
         ).interactive()
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width="stretch")
     
     # Hourly Activity
     st.subheader("Активность по часам")
@@ -307,7 +349,7 @@ def show_annotator_stats(stats_service: StatsService):
                 color=alt.Color('annotator:N', title='Разметчик'),
                 tooltip=['hour', 'annotator', 'count']
             ).interactive()
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
             
             # Summary table
             summary = hourly_filtered.groupby("annotator").agg(
@@ -317,7 +359,7 @@ def show_annotator_stats(stats_service: StatsService):
                 last_hour=("hour", "max")
             ).reset_index()
             summary.columns = ["Разметчик", "Всего", "Часов", "Начало", "Конец"]
-            st.dataframe(summary, use_container_width=True, hide_index=True)
+            st.dataframe(summary, width="stretch", hide_index=True)
     else:
         st.info("Нет данных об активности по часам.")
 
@@ -387,9 +429,10 @@ def show_intent_quality(stats_service: StatsService):
                 "confusion_link", "confusion_percentage_val"
             ],
             hide_index=True,
-            width="stretch"
+            width="stretch",
+            height="content"
         )
-        
+
     else:
         st.info("Нет данных о качестве интентов")
 
@@ -401,7 +444,29 @@ def show_text_overview(stats_service: StatsService):
     # All metadata for filters
     all_intents = stats_service.get_all_intents()
     all_annotators = stats_service.get_unique_assigned_annotators()
-    
+    all_languages = stats_service.get_unique_languages()
+
+    # — Assign unassigned button —
+    with st.expander("⚡ Действия", expanded=False):
+        st.markdown(
+            "**Назначить неназначенные тексты** — запускает алгоритм назначения "
+            "для всех текстов без разметчика (или с устаревшим назначением)."
+        )
+        if st.button("🔄 Назначить неназначенные", key="btn_assign_unassigned"):
+            with st.spinner("Назначаю тексты..."):
+                try:
+                    auth_service = AuthService(settings.annotators_path)
+                    annotators = auth_service.load_annotators().annotators
+                    annotation_service = AnnotationService(settings.db_path)
+                    updated = annotation_service.assign_unannotated_texts(annotators)
+                    if updated:
+                        st.success(f"✅ Назначено / переназначено текстов: **{updated}**")
+                    else:
+                        st.info("ℹ️ Все тексты уже корректно назначены, изменений нет.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Ошибка: {e}")
+
     # 1. Filters Section
     with st.expander("🔍 Фильтры", expanded=True):
         col1, col2, col3 = st.columns(3)
@@ -415,6 +480,16 @@ def show_text_overview(stats_service: StatsService):
             is_annotated = None
             if is_annotated_option == "Размечено": is_annotated = True
             elif is_annotated_option == "Не размечено": is_annotated = False
+            if all_languages:
+                selected_languages = st.multiselect(
+                    "Язык",
+                    options=all_languages,
+                    key="filter_language",
+                    help="Фильтр по языку текста",
+                    format_func=lambda code: LANGUAGE_NAMES.get(code, code)
+                )
+            else:
+                selected_languages = []
 
         with col2:
             # Persistent filters from query params
@@ -445,11 +520,15 @@ def show_text_overview(stats_service: StatsService):
             if human_intents != q_human: st.query_params["human"] = human_intents
         
         with col3:
+            q_assigned = st.query_params.get_all("assigned")
+            assigned_options = ["[Unassigned]"] + all_annotators
+            if "filter_assigned" not in st.session_state and q_assigned:
+                st.session_state.filter_assigned = [a for a in q_assigned if a in assigned_options]
             assigned_annotators = st.multiselect(
                 "Назначено на",
-                options=all_annotators,
+                options=assigned_options,
                 key="filter_assigned",
-                help="Фильтр по назначенным разметчикам"
+                help="Фильтр по назначенным разметчикам (включая [Unassigned] для текстов без назначения)"
             )
             only_disagreements = st.toggle("Только разногласия", key="filter_disagreements", help="Показать тексты, где разметчики разошлись во мнениях")
 
@@ -459,6 +538,7 @@ def show_text_overview(stats_service: StatsService):
         top5_intents=top5_intents,
         human_intents=human_intents,
         assigned_annotators=assigned_annotators,
+        languages=selected_languages if selected_languages else None,
         is_annotated=is_annotated,
         only_disagreements=only_disagreements
     )
@@ -503,6 +583,7 @@ def show_text_overview(stats_service: StatsService):
         top5_intents=top5_intents,
         human_intents=human_intents,
         assigned_annotators=assigned_annotators,
+        languages=selected_languages if selected_languages else None,
         is_annotated=is_annotated,
         only_disagreements=only_disagreements,
         limit=limit_val,
@@ -564,13 +645,13 @@ def show_text_overview(stats_service: StatsService):
                 pg_cols = st.columns([0.6, 0.6, 5.0, 0.6, 0.6])
                 
                 with pg_cols[0]:
-                    if st.button("⏪", disabled=(page_number == 1), key="pg_first", use_container_width=True):
+                    if st.button("⏪", disabled=(page_number == 1), key="pg_first", width="stretch"):
                         st.session_state.text_overview_page = 1
                         st.session_state.pg_jump_select = 1
                         st.rerun()
                 
                 with pg_cols[1]:
-                    if st.button("◀️", disabled=(page_number == 1), key="pg_prev", use_container_width=True):
+                    if st.button("◀️", disabled=(page_number == 1), key="pg_prev", width="stretch"):
                         new_pg = max(1, page_number - 1)
                         st.session_state.text_overview_page = new_pg
                         st.session_state.pg_jump_select = new_pg
@@ -592,7 +673,7 @@ def show_text_overview(stats_service: StatsService):
                             str(p), 
                             type="primary" if p == page_number else "secondary",
                             key=f"pg_num_{p}",
-                            use_container_width=True
+                            width="stretch"
                         ):
                             st.session_state.text_overview_page = p
                             st.session_state.pg_jump_select = p
@@ -613,14 +694,14 @@ def show_text_overview(stats_service: StatsService):
                         st.rerun()
 
                 with pg_cols[3]:
-                    if st.button("▶️", disabled=(page_number == total_pages), key="pg_next", use_container_width=True):
+                    if st.button("▶️", disabled=(page_number == total_pages), key="pg_next", width="stretch"):
                         new_pg = min(total_pages, page_number + 1)
                         st.session_state.text_overview_page = new_pg
                         st.session_state.pg_jump_select = new_pg
                         st.rerun()
                         
                 with pg_cols[4]:
-                    if st.button("⏩", disabled=(page_number == total_pages), key="pg_last", use_container_width=True):
+                    if st.button("⏩", disabled=(page_number == total_pages), key="pg_last", width="stretch"):
                         st.session_state.text_overview_page = total_pages
                         st.session_state.pg_jump_select = total_pages
                         st.rerun()
@@ -658,7 +739,7 @@ def show_cluster_progress(stats_service: StatsService):
             y=alt.Y('annotated_texts:Q', title='Размечено'),
             tooltip=['cluster', 'total_texts', 'annotated_texts', 'completion_rate']
         ).interactive()
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width="stretch")
     else:
         st.info("Нет данных о кластерах")
 
@@ -838,7 +919,20 @@ def show_import_section():
                             st.metric("Пропущено (дубликаты)", skipped_count, delta=-skipped_count if skipped_count > 0 else 0)
                         
                         st.info(f"📁 Файл сохранен: {upload_path}")
-                        
+
+                        # Check for unassigned texts
+                        with get_connection(settings.db_path) as conn:
+                            unassigned = conn.execute(
+                                "SELECT COUNT(*) FROM texts WHERE assigned_to IS NULL OR assigned_to = ''"
+                            ).fetchone()[0]
+                        if unassigned > 0:
+                            texts_tab = "📝 Тексты"
+                            link = f"/admin?tab={texts_tab}&assigned=[Unassigned]"
+                            st.warning(
+                                f"⚠️ {unassigned} текстов не назначены разметчикам. "
+                                f"[Открыть в Текстах]({link})"
+                            )
+
                     except Exception as e:
                         st.error(f"❌ Ошибка импорта: {str(e)}")
                         
@@ -893,9 +987,9 @@ def main():
         "🎯 Качество",
         "📝 Тексты",
         "📈 Кластеры",
-        "⚠️ Разногласия",
         "💾 Экспорт",
-        "📥 Импорт"
+        "📥 Импорт",
+        "⚙️ Настройки"
     ]
     
     # Persistent tab via cookies
@@ -956,15 +1050,137 @@ def main():
     elif selected_tab == "📈 Кластеры":
         show_cluster_progress(stats_service)
     
-    elif selected_tab == "⚠️ Разногласия":
-        show_disagreements(stats_service)
-    
     elif selected_tab == "💾 Экспорт":
         show_export_section(stats_service)
     
     elif selected_tab == "📥 Импорт":
         show_import_section()
 
+    elif selected_tab == "⚙️ Настройки":
+        show_settings(stats_service)
+
+
+_ENV_PATH = str(Path(__file__).parent.parent / ".env")
+
+# Mapping: (env_key, settings_attr_name)
+_ENV_FIELDS = {
+    "set_dump_interval": ("TEXTS_DB_DUMP_INTERVAL_SEC", "db_dump_interval"),
+    "set_top_k": ("TEXTS_TOP_K", "top_k"),
+    "set_prob_threshold": ("TEXTS_PROBABILITY_THRESHOLD", "probability_threshold"),
+    "set_conf_threshold": ("ANNOTATORS_INTENTS_CONFIDENCE_THRESHOLD", "annotators_intents_confidence_threshold"),
+    "set_margin_threshold": ("TEXTS_MARGIN_THRESHOLD", "margin_threshold"),
+    "set_log_level": ("LOG_LEVEL", "log_level"),
+}
+
+
+_PERCENT_FIELDS = {"set_prob_threshold", "set_conf_threshold", "set_margin_threshold"}
+
+
+def _save_settings_to_env():
+    """Write current widget values to .env and update in-memory settings."""
+    for widget_key, (env_key, attr_name) in _ENV_FIELDS.items():
+        value = st.session_state.get(widget_key)
+        if value is not None:
+            if attr_name in ("db_dump_interval", "top_k"):
+                value = int(value)
+            elif widget_key in _PERCENT_FIELDS:
+                value = round(value / 100.0, 4)
+            set_key(_ENV_PATH, env_key, str(value))
+            setattr(settings, attr_name, value)
+
+
+def _load_settings_from_env():
+    """Re-read .env into a fresh Settings instance and update global settings."""
+    from src.utils.config import Settings
+    fresh = Settings()
+    for _, (_, attr_name) in _ENV_FIELDS.items():
+        setattr(settings, attr_name, getattr(fresh, attr_name))
+
+
+def show_settings(stats_service: StatsService):
+    """Settings tab for application configuration."""
+    st.subheader("Настройки приложения")
+
+    # --- UI Settings (stored in DB) ---
+    st.markdown("#### Интерфейс разметки")
+
+    current_conf = stats_service.get_setting("show_confidence", "0")
+    show_conf = st.checkbox(
+        "Показывать уверенность модели рядом с интентами",
+        value=current_conf == "1",
+        help="Если включено, рядом с каждым интентом будет отображаться процент уверенности модели"
+    )
+    new_conf = "1" if show_conf else "0"
+    if new_conf != current_conf:
+        stats_service.set_setting("show_confidence", new_conf)
+        st.rerun()
+
+    # --- .env parameters ---
+    st.divider()
+    st.markdown("#### Параметры приложения")
+
+    # -- Database --
+    st.markdown("**База данных**")
+    st.number_input(
+        "Интервал автосохранения дампа (сек)",
+        value=settings.db_dump_interval, min_value=10, step=10,
+        help="TEXTS_DB_DUMP_INTERVAL_SEC — минимум 10",
+        key="set_dump_interval",
+    )
+
+    # -- Application --
+    st.markdown("**Модель и пороги**")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.number_input(
+            "Количество показываемых интентов (Top-K)",
+            value=settings.top_k, min_value=1, max_value=20, step=1,
+            help="TEXTS_TOP_K — от 1 до 20",
+            key="set_top_k",
+        )
+        st.number_input(
+            "Порог вероятности для импорта кандидатов, %",
+            value=int(settings.probability_threshold * 100), min_value=0, max_value=100, step=5,
+            help="TEXTS_PROBABILITY_THRESHOLD — кандидаты ниже порога не импортируются (0–100%)",
+            key="set_prob_threshold",
+        )
+
+    with col2:
+        st.number_input(
+            "Порог уверенности для интентов разметчика, %",
+            value=int(settings.annotators_intents_confidence_threshold * 100),
+            min_value=0, max_value=100, step=5,
+            help="ANNOTATORS_INTENTS_CONFIDENCE_THRESHOLD — минимальная уверенность для показа интента разметчику (0–100%)",
+            key="set_conf_threshold",
+        )
+        st.number_input(
+            "Порог маржи между кандидатами, %",
+            value=int(settings.margin_threshold * 100), min_value=0, max_value=100, step=5,
+            help="TEXTS_MARGIN_THRESHOLD — минимальная разница вероятностей между кандидатами (0–100%)",
+            key="set_margin_threshold",
+        )
+
+    # -- Logging --
+    st.markdown("**Логирование**")
+    st.selectbox(
+        "Уровень логирования",
+        options=["DEBUG", "INFO", "WARNING", "ERROR"],
+        index=["DEBUG", "INFO", "WARNING", "ERROR"].index(settings.log_level),
+        help="LOG_LEVEL",
+        key="set_log_level",
+    )
+
+    # -- Save / Load buttons --
+    st.divider()
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("💾 Сохранить в .env"):
+            _save_settings_to_env()
+            st.success("Сохранено в .env")
+    with c2:
+        if st.button("📂 Загрузить из .env"):
+            _load_settings_from_env()
+            st.rerun()
 
 
 if __name__ == "__main__":

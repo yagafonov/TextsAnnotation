@@ -40,16 +40,25 @@ class TextRepository(BaseRepository):
             ID of created text
         """
         with get_connection(self.db_path) as conn:
+            # Check for existing text first to return its ID if ignored
             cursor = conn.execute(
                 """
-                INSERT INTO texts (text, language, clusters, assigned_cluster, assigned_to, data_version, created_at)
+                INSERT OR IGNORE INTO texts (text, language, clusters, assigned_cluster, assigned_to, data_version, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (text, language, clusters, assigned_cluster, assigned_to, data_version, datetime.now(timezone.utc).isoformat())
             )
+            
             text_id = cursor.lastrowid
             
-            # Insert candidates
+            # If nothing inserted (row existed), fetch existing ID
+            if cursor.rowcount == 0:
+                row = conn.execute("SELECT id FROM texts WHERE text = ?", (text,)).fetchone()
+                if row:
+                    return row["id"]
+                return 0 # Should not happen with UNIQUE constraint
+            
+            # Insert candidates only for new text
             for candidate in candidates:
                 conn.execute(
                     """
@@ -67,7 +76,7 @@ class TextRepository(BaseRepository):
                 )
             
             conn.commit()
-            logger.info(f"Created text#{text_id} with {len(candidates)} candidates (assigned_to: {assigned_to})")
+            logger.debug(f"Created text#{text_id} with {len(candidates)} candidates (assigned_to: {assigned_to})")
             return text_id
     
     def get_by_id(self, text_id: int) -> Optional[Text]:
@@ -84,7 +93,7 @@ class TextRepository(BaseRepository):
                 """
                 SELECT 
                     id, 
-                    text as request_text, 
+                    text, 
                     language, 
                     clusters, 
                     assigned_cluster, 
@@ -101,7 +110,7 @@ class TextRepository(BaseRepository):
             
             return Text(
                 id=row["id"],
-                text=row["request_text"],
+                text=row["text"],
                 language=row["language"],
                 clusters=row["clusters"],
                 assigned_cluster=row["assigned_cluster"],
@@ -172,7 +181,7 @@ class TextRepository(BaseRepository):
                 base_query = """
                     SELECT
                         t.id,
-                        t.text as request_text,
+                        t.text,
                         t.language,
                         t.clusters,
                         t.assigned_cluster,
@@ -181,10 +190,10 @@ class TextRepository(BaseRepository):
                         COUNT(DISTINCT a.annotator) as annotators
                     FROM texts t
                     LEFT JOIN annotations a ON a.text_id = t.id
-                    INNER JOIN skipped_texts s ON s.text_id = t.id AND s.annotator = ?
                 """
-                params = [annotator]
+                params = []
                 filters = [
+                    "t.is_skipped = 1",
                     "NOT EXISTS (SELECT 1 FROM annotations a2 WHERE a2.text_id = t.id AND a2.annotator = ?)"
                 ]
                 params.append(annotator)
@@ -192,7 +201,7 @@ class TextRepository(BaseRepository):
                 base_query = """
                     SELECT
                         t.id,
-                        t.text as request_text,
+                        t.text,
                         t.language,
                         t.clusters,
                         t.assigned_cluster,
@@ -204,12 +213,11 @@ class TextRepository(BaseRepository):
                     LEFT JOIN annotations a ON a.text_id = t.id
                 """
                 params = []
-                # Exclude if already annotated or skipped by this annotator
                 filters = [
                     "NOT EXISTS (SELECT 1 FROM annotations a2 WHERE a2.text_id = t.id AND a2.annotator = ?)",
-                    "NOT EXISTS (SELECT 1 FROM skipped_texts s WHERE s.text_id = t.id AND s.annotator = ?)"
+                    "t.is_skipped = 0"
                 ]
-                params.extend([annotator, annotator])
+                params.append(annotator)
             
             # ASSIGNMENT LOGIC:
             # 1. If assigned_to is set, it MUST match annotator
@@ -263,7 +271,10 @@ class TextRepository(BaseRepository):
         annotator: str,
         clusters: Optional[List[str]] = None,
         intents: Optional[List[str]] = None,
-        language: Optional[str] = None
+        language: Optional[str] = None,
+        candidate_label: Optional[str] = None,
+        candidate_threshold: float = 0.0,
+        candidate_by_cluster: bool = False
     ) -> List[dict]:
         """Get all texts with status for an annotator.
         
@@ -280,19 +291,16 @@ class TextRepository(BaseRepository):
             base_query = """
                 SELECT
                     t.id,
-                    t.text as request_text,
+                    t.text,
                     t.assigned_to,
-                    CASE 
+                    t.is_skipped,
+                    CASE
                         WHEN EXISTS (SELECT 1 FROM annotations a WHERE a.text_id = t.id AND a.annotator = ?) THEN 1
                         ELSE 0
-                    END as is_annotated,
-                    CASE 
-                        WHEN EXISTS (SELECT 1 FROM skipped_texts s WHERE s.text_id = t.id AND s.annotator = ?) THEN 1
-                        ELSE 0
-                    END as is_skipped
+                    END as is_annotated
                 FROM texts t
             """
-            params = [annotator, annotator]
+            params = [annotator]
             filters = []
             
             # ASSIGNMENT LOGIC (Same as above)
@@ -326,9 +334,98 @@ class TextRepository(BaseRepository):
             assignment_clause += ")"
             filters.append(assignment_clause)
             params.extend(assignment_params)
-            
+
+            # Candidate content filter (applies to ALL texts, not just assignment)
+            if candidate_label:
+                if candidate_by_cluster:
+                    filters.append("""
+                        EXISTS (
+                            SELECT 1 FROM candidates c
+                            JOIN intents i ON i.label = c.label
+                            WHERE c.text_id = t.id
+                              AND i.cluster = ?
+                              AND c.probability >= ?
+                        )
+                    """)
+                else:
+                    filters.append("""
+                        EXISTS (
+                            SELECT 1 FROM candidates c
+                            WHERE c.text_id = t.id
+                              AND c.label = ?
+                              AND c.probability >= ?
+                        )
+                    """)
+                params.extend([candidate_label, candidate_threshold])
+
             where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
             query = f"{base_query} {where_clause} ORDER BY t.id ASC"
             
             rows = conn.execute(query, params).fetchall()
             return [dict(row) for row in rows]
+
+    def get_label_stats(
+        self,
+        annotator: str,
+        labels: List[str],
+        threshold: float,
+        by_cluster: bool = False
+    ) -> List[dict]:
+        """Get per-intent or per-cluster stats for an annotator.
+
+        Counts texts where:
+          - assigned_to = annotator
+          - at least one candidate matches the label (or cluster) with probability >= threshold
+
+        Args:
+            annotator: Annotator name
+            labels: List of intent labels or cluster names
+            threshold: Minimum candidate probability to count
+            by_cluster: If True, labels are cluster names; if False, they are intent labels
+
+        Returns:
+            List of dicts: {label, total, annotated}
+        """
+        results = []
+        with get_connection(self.db_path) as conn:
+            for label in labels:
+                if by_cluster:
+                    match_cond = """
+                        EXISTS (
+                            SELECT 1 FROM candidates c
+                            JOIN intents i ON i.label = c.label
+                            WHERE c.text_id = t.id
+                              AND i.cluster = ?
+                              AND c.probability >= ?
+                        )
+                    """
+                else:
+                    match_cond = """
+                        EXISTS (
+                            SELECT 1 FROM candidates c
+                            WHERE c.text_id = t.id
+                              AND c.label = ?
+                              AND c.probability >= ?
+                        )
+                    """
+
+                base = f"""
+                    FROM texts t
+                    WHERE t.assigned_to = ?
+                      AND {match_cond}
+                """
+                params = [annotator, label, threshold]
+
+                total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
+                annotated = conn.execute(
+                    f"""SELECT COUNT(*) {base}
+                        AND EXISTS (
+                            SELECT 1 FROM annotations a
+                            WHERE a.text_id = t.id AND a.annotator = ?
+                        )""",
+                    params + [annotator]
+                ).fetchone()[0]
+
+                results.append({"label": label, "total": total, "annotated": annotated})
+
+        return results
