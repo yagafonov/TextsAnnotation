@@ -447,26 +447,55 @@ def show_text_overview(stats_service: StatsService):
     all_annotators = stats_service.get_unique_assigned_annotators()
     all_languages = stats_service.get_unique_languages()
 
-    # — Assign unassigned button —
+    # — Action buttons —
     with st.expander("⚡ Действия", expanded=False):
-        st.markdown(
-            "**Назначить неназначенные тексты** — запускает алгоритм назначения "
-            "для всех текстов без разметчика (или с устаревшим назначением)."
-        )
-        if st.button("🔄 Назначить неназначенные", key="btn_assign_unassigned"):
-            with st.spinner("Назначаю тексты..."):
-                try:
-                    auth_service = AuthService(settings.annotators_path)
-                    annotators = auth_service.load_annotators().annotators
-                    annotation_service = AnnotationService(settings.db_path)
-                    updated = annotation_service.assign_unannotated_texts(annotators)
-                    if updated:
-                        st.success(f"✅ Назначено / переназначено текстов: **{updated}**")
-                    else:
-                        st.info("ℹ️ Все тексты уже корректно назначены, изменений нет.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Ошибка: {e}")
+        act_col1, act_col2 = st.columns(2)
+
+        with act_col1:
+            st.markdown(
+                "**Назначить по факту разметки** — для текстов без назначения "
+                "проставляет тех разметчиков, которые уже разметили текст."
+            )
+            if st.button("👤 Назначить размеченных", key="btn_assign_actual"):
+                with st.spinner("Назначаю..."):
+                    try:
+                        with get_connection(settings.db_path) as conn:
+                            updated = conn.execute("""
+                                UPDATE texts SET assigned_to = (
+                                    SELECT GROUP_CONCAT(DISTINCT annotator)
+                                    FROM annotations WHERE text_id = texts.id
+                                )
+                                WHERE (assigned_to IS NULL OR assigned_to = '')
+                                  AND id IN (SELECT DISTINCT text_id FROM annotations)
+                            """).rowcount
+                            conn.commit()
+                        if updated:
+                            st.success(f"✅ Назначено текстов: **{updated}**")
+                        else:
+                            st.info("ℹ️ Нет текстов для назначения.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Ошибка: {e}")
+
+        with act_col2:
+            st.markdown(
+                "**Переназначить неразмеченные** — запускает алгоритм назначения "
+                "для всех текстов, которые ещё не размечены."
+            )
+            if st.button("🔄 Переназначить неразмеченные", key="btn_reassign_unannotated"):
+                with st.spinner("Назначаю тексты..."):
+                    try:
+                        auth_service = AuthService(settings.annotators_path)
+                        annotators = auth_service.load_annotators().annotators
+                        annotation_service = AnnotationService(settings.db_path)
+                        updated = annotation_service.assign_unannotated_texts(annotators)
+                        if updated:
+                            st.success(f"✅ Назначено / переназначено текстов: **{updated}**")
+                        else:
+                            st.info("ℹ️ Все тексты уже корректно назначены.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Ошибка: {e}")
 
     # 1. Filters Section
     with st.expander("🔍 Фильтры", expanded=True):
@@ -531,7 +560,6 @@ def show_text_overview(stats_service: StatsService):
                 key="filter_assigned",
                 help="Фильтр по назначенным разметчикам (включая [Unassigned] для текстов без назначения)"
             )
-            only_disagreements = st.toggle("Только разногласия", key="filter_disagreements", help="Показать тексты, где разметчики разошлись во мнениях")
 
     # 2. Base Count for pagination (needed before fetching data)
     total_count = stats_service.get_text_count(
@@ -541,7 +569,6 @@ def show_text_overview(stats_service: StatsService):
         assigned_annotators=assigned_annotators,
         languages=selected_languages if selected_languages else None,
         is_annotated=is_annotated,
-        only_disagreements=only_disagreements
     )
     
     # Initial page settings
@@ -586,7 +613,6 @@ def show_text_overview(stats_service: StatsService):
         assigned_annotators=assigned_annotators,
         languages=selected_languages if selected_languages else None,
         is_annotated=is_annotated,
-        only_disagreements=only_disagreements,
         limit=limit_val,
         offset=offset
     )
@@ -597,27 +623,28 @@ def show_text_overview(stats_service: StatsService):
         # Dynamic columns for human intents start with "Chosen Intent"
         chosen_cols = [c for c in df.columns if c.startswith("Chosen Intent")]
         model_cols = [f"Model Top {i}" for i in range(1, 6)]
-        
-        # Format disagreement column
-        df['disagreement_icon'] = df['has_disagreement'].apply(lambda x: "⚠️" if x else "")
-        
+
+        # Map language codes to human-readable names
+        if "language" in df.columns:
+            df["language"] = df["language"].map(lambda v: LANGUAGE_NAMES.get(v, v) if v else "")
+
         # Display the dataframe
         st.dataframe(
             df,
             column_config={
                 "id": st.column_config.NumberColumn("ID", width="small"),
-                "disagreement_icon": st.column_config.TextColumn("⚠️", width="small", help="Разногласия в разметке"),
                 "text": st.column_config.TextColumn("Текст", width="large"),
+                "language": "Язык",
                 "assigned_to": "Назначено",
                 "actual_annotators": "Размечали",
                 "cluster": "Кластер",
                 **{c: st.column_config.TextColumn(c, width="medium") for c in model_cols},
                 **{c: st.column_config.TextColumn(c, width="medium") for c in chosen_cols}
             },
-            column_order=["id", "disagreement_icon", "text", "assigned_to", "actual_annotators", "cluster"] + model_cols + chosen_cols,
+            column_order=["id", "text", "language", "assigned_to", "actual_annotators", "cluster"] + model_cols + chosen_cols,
             hide_index=True,
             width="stretch",
-            height="content"  # Grow to fit content
+            height="content"
         )
     else:
         st.info("Тексты не найдены")

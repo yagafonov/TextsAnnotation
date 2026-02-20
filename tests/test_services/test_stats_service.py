@@ -641,7 +641,7 @@ class TestStatsServiceOverview:
         assert "annotator_x" in annotators
 
     def test_get_text_detailed_overview_extra_filters(self, temp_db, text_repo, annotation_repo):
-        """Test detailed overview with human intents and disagreements."""
+        """Test detailed overview with human intents filter."""
         # Arrange
         text_id = text_repo.create(
             text="Human intent test",
@@ -660,24 +660,15 @@ class TestStatsServiceOverview:
             extra_labels=[],
             shown_intents_source={"intent_a": "candidate"}
         )
-        annotation_repo.save_annotations(
-            text_id=text_id,
-            annotator="user2",
-            decisions={"intent_a": "no"},  # Disagreement here
-            candidate_labels=["intent_a"],
-            extra_labels=[],
-            shown_intents_source={"intent_a": "candidate"}
-        )
-        
+
         service = StatsService(temp_db)
-        
+
         # Act
         df_human = service.get_text_detailed_overview(human_intents=["intent_a"])
-        df_disagree = service.get_text_detailed_overview(only_disagreements=True)
-        
+
         # Assert
         assert len(df_human) == 1
-        assert len(df_disagree) == 1
+        assert "language" in df_human.columns
 
     def test_get_cluster_progress_filtered(self, temp_db, text_repo):
         """Test cluster progress with filters."""

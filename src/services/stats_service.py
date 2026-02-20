@@ -415,7 +415,6 @@ class StatsService(BaseRepository):
         assigned_annotators: List[str] = None,
         languages: List[str] = None,
         is_annotated: Optional[bool] = None,
-        only_disagreements: bool = False,
         limit: Optional[int] = 100,
         offset: int = 0
     ) -> pd.DataFrame:
@@ -461,35 +460,16 @@ class StatsService(BaseRepository):
             where_clauses.append(f"t.language IN ({placeholders})")
             params.extend(languages)
 
-        if only_disagreements:
-            where_clauses.append("""
-                EXISTS (
-                    SELECT 1 FROM annotations a3 
-                    WHERE a3.text_id = t.id 
-                    GROUP BY a3.text_id, a3.label 
-                    HAVING COUNT(DISTINCT a3.annotator) >= 2 
-                       AND SUM(CASE WHEN a3.decision = 'yes' THEN 1 ELSE 0 END) > 0 
-                       AND SUM(CASE WHEN a3.decision = 'no' THEN 1 ELSE 0 END) > 0
-                )
-            """)
-
         where_sql = " AND ".join(where_clauses)
 
         base_query = f"""
-            SELECT 
-                t.id, 
-                t.text, 
+            SELECT
+                t.id,
+                t.text,
+                t.language,
                 t.assigned_to,
                 t.assigned_cluster as cluster,
-                (SELECT GROUP_CONCAT(DISTINCT annotator) FROM annotations WHERE text_id = t.id) as actual_annotators,
-                EXISTS (
-                    SELECT 1 FROM annotations a3 
-                    WHERE a3.text_id = t.id 
-                    GROUP BY a3.text_id, a3.label 
-                    HAVING COUNT(DISTINCT a3.annotator) >= 2 
-                       AND SUM(CASE WHEN a3.decision = 'yes' THEN 1 ELSE 0 END) > 0 
-                       AND SUM(CASE WHEN a3.decision = 'no' THEN 1 ELSE 0 END) > 0
-                ) as has_disagreement
+                (SELECT GROUP_CONCAT(DISTINCT annotator) FROM annotations WHERE text_id = t.id) as actual_annotators
             FROM texts t
             WHERE {where_sql}
             ORDER BY t.created_at DESC
@@ -557,7 +537,6 @@ class StatsService(BaseRepository):
         assigned_annotators: List[str] = None,
         languages: List[str] = None,
         is_annotated: Optional[bool] = None,
-        only_disagreements: bool = False
     ) -> int:
         """Get count of texts matching filters."""
         where_clauses = ["1=1"]
@@ -605,18 +584,6 @@ class StatsService(BaseRepository):
             placeholders = ", ".join(["?"] * len(languages))
             where_clauses.append(f"t.language IN ({placeholders})")
             params.extend(languages)
-            
-        if only_disagreements:
-            where_clauses.append("""
-                EXISTS (
-                    SELECT 1 FROM annotations a3 
-                    WHERE a3.text_id = t.id 
-                    GROUP BY a3.text_id, a3.label 
-                    HAVING COUNT(DISTINCT a3.annotator) >= 2 
-                       AND SUM(CASE WHEN a3.decision = 'yes' THEN 1 ELSE 0 END) > 0 
-                       AND SUM(CASE WHEN a3.decision = 'no' THEN 1 ELSE 0 END) > 0
-                )
-            """)
             
         where_sql = " AND ".join(where_clauses)
         query = f"SELECT COUNT(*) as count FROM texts t WHERE {where_sql}"

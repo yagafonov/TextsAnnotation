@@ -777,6 +777,24 @@ def show_annotation_interface(
         }};
 
         [100, 300, 600, 1000].forEach(delay => setTimeout(startFocus, delay));
+
+        // --- MOBILE: strip shortcut hints from buttons ---
+        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(pWin.navigator.userAgent)
+                      || pWin.innerWidth < 768;
+        if (isMobile) {{
+            const stripHints = () => {{
+                pDoc.querySelectorAll('button').forEach(btn => {{
+                    btn.textContent = btn.textContent
+                        .replace(/\s*\[Enter\]/g, '')
+                        .replace(/\s*\[Esc\]/g, '')
+                        .replace(/\s*\+\s*⌘/g, '')
+                        .replace(/\s*⌘\s*\+\s*/g, '')
+                        .replace(/\s*\+\s*Ctrl/g, '')
+                        .replace(/\s*Ctrl\s*\+\s*/g, '');
+                }});
+            }};
+            [100, 300, 600, 1000].forEach(delay => setTimeout(stripHints, delay));
+        }}
     }})();
     </script>
     """
