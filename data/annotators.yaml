@@ -3,43 +3,43 @@ annotators:
   language: Казахский
   password: jfkasn2
   cluster:
-  - card_products_rus
+  # - card_products_rus
   - credits_rus
-  - general_rus
-  - mobile_app_support_rus
+  # - general_rus
+  # - mobile_app_support_rus
   - money_transfers_rus
   - restrictions_rus
-  - social_rus
+  # - social_rus
 - name: madina
   language: Казахский
   password: knvws1
   cluster:
   - card_products_rus
-  - credits_rus
+  #- credits_rus
   - general_rus
   - mobile_app_support_rus
-  - money_transfers_rus
-  - restrictions_rus
+  #- money_transfers_rus
+  #- restrictions_rus
   - social_rus
 - name: roma
   language: Русский
   password: vnbhb4
   cluster:
   - card_products_rus
-  - credits_rus
+  #- credits_rus
   - general_rus
   - mobile_app_support_rus
-  - money_transfers_rus
-  - restrictions_rus
+  #- money_transfers_rus
+  #- restrictions_rus
   - social_rus
 - name: iskander
   language: Русский
   password: mokensvjb1
   cluster:
-  - card_products_rus
+  # - card_products_rus
   - credits_rus
-  - general_rus
-  - mobile_app_support_rus
+  # - general_rus
+  # - mobile_app_support_rus
   - money_transfers_rus
   - restrictions_rus
-  - social_rus
+  # - social_rus
