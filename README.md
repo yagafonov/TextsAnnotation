@@ -30,7 +30,7 @@ pages/admin.py       # Admin dashboard
 ## Quick Start
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.10+
 - pip
 
 ### Installation
@@ -93,6 +93,8 @@ annotators:
 | `Space` | Toggle focused intent checkbox |
 | `↑ ↓ ← →` | Navigate between intent checkboxes |
 
+Shortcut hints are automatically hidden on mobile devices.
+
 ### Annotation Interface
 - **Intent filtering** — filter texts by intent or cluster from the sidebar dropdown
 - **Skip / Unskip** — mark texts to revisit later; skipped texts shown with ⏭️ marker
@@ -111,7 +113,7 @@ annotators:
 | Overview | Total texts, annotations, annotators, completion rate |
 | Annotators | Per-annotator stats and activity charts |
 | Quality | Model quality metrics, top-1 precision by intent |
-| Texts | Detailed text overview with filters (assigned, cluster, search) |
+| Texts | Detailed text overview with filters, bulk assign/re-assign actions |
 | Clusters | Per-cluster annotation progress |
 | Export | CSV export of annotations |
 | Import | CSV import with duplicate detection and unassigned text warnings |
@@ -273,4 +275,4 @@ TextsAnnotation/
 
 ### "Tests failing"
 - Ensure all dependencies installed: `pip install -r requirements-dev.txt`
-- Python 3.8+ required
+- Python 3.10+ required

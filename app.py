@@ -576,22 +576,24 @@ def show_annotation_interface(
     is_completed = current_text["is_annotated"]
     is_skipped_status = current_text["is_skipped"]
 
-    # Navigation arrows (Main Area)
+    # Navigation arrows (Main Area) — iterate within filtered list
     col_prev, col_status, col_next = st.columns([1, 4, 1])
-    
+
     with col_prev:
-        if st.button(f"⬅️ + {_MOD_KEY}", width="content", disabled=st.session_state.current_text_index == 0):
-            st.session_state.current_text_index -= 1
+        if st.button(f"⬅️ + {_MOD_KEY}", width="content", disabled=current_filtered_index == 0):
+            prev_filtered = current_filtered_index - 1
+            st.session_state.current_text_index = text_to_original_index[prev_filtered]
             st.rerun()
 
     with col_next:
-        if st.button(f"{_MOD_KEY} + ➡️", width="content", disabled=st.session_state.current_text_index == len(all_texts) - 1):
-            st.session_state.current_text_index += 1
+        if st.button(f"{_MOD_KEY} + ➡️", width="content", disabled=current_filtered_index >= len(filtered_texts) - 1):
+            next_filtered = current_filtered_index + 1
+            st.session_state.current_text_index = text_to_original_index[next_filtered]
             st.rerun()
-            
+
     with col_status:
         # Centered text ID
-        st.markdown(f"<div style='text-align: center; margin-bottom: 5px;'>Текст {st.session_state.current_text_index + 1} из {len(all_texts)}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; margin-bottom: 5px;'>Текст {current_filtered_index + 1} из {len(filtered_texts)}</div>", unsafe_allow_html=True)
         
         # Centered status badge
         if is_skipped_status:
@@ -848,27 +850,31 @@ def show_annotation_interface(
         shown_intents_source[extra] = "extra"
     
     # Action buttons
-    col1, col2, col3 = st.columns([1, 1, 2])
+    col1, col2 = st.columns(2)
     
-    def find_next_pending_index(current_idx, all_texts):
-        # Search forward
-        for i in range(current_idx + 1, len(all_texts)):
-            if not all_texts[i]["is_annotated"] and not all_texts[i]["is_skipped"]:
-                return i
+    def find_next_pending_filtered(current_filtered_idx, filtered_texts, text_to_original_index):
+        """Find next pending text within the filtered list, return original index."""
+        n = len(filtered_texts)
+        # Search forward in filtered list
+        for i in range(current_filtered_idx + 1, n):
+            t = filtered_texts[i]
+            if not t["is_annotated"] and not t["is_skipped"]:
+                return text_to_original_index[i]
         # Wrap around from start
-        for i in range(0, current_idx):
-            if not all_texts[i]["is_annotated"] and not all_texts[i]["is_skipped"]:
-                return i
-        # If no strict pending found, try to find ANY unannotated (including skipped)
-        for i in range(current_idx + 1, len(all_texts)):
-            if not all_texts[i]["is_annotated"]:
-                return i
-        for i in range(0, current_idx):
-            if not all_texts[i]["is_annotated"]:
-                return i
-                
-        # If all done, stay current
-        return min(current_idx + 1, len(all_texts) - 1)
+        for i in range(0, current_filtered_idx):
+            t = filtered_texts[i]
+            if not t["is_annotated"] and not t["is_skipped"]:
+                return text_to_original_index[i]
+        # If no strict pending, try ANY unannotated
+        for i in range(current_filtered_idx + 1, n):
+            if not filtered_texts[i]["is_annotated"]:
+                return text_to_original_index[i]
+        for i in range(0, current_filtered_idx):
+            if not filtered_texts[i]["is_annotated"]:
+                return text_to_original_index[i]
+        # All done — move to next in filtered list or stay
+        next_f = min(current_filtered_idx + 1, n - 1)
+        return text_to_original_index[next_f]
 
     with col1:
         if st.button("✅ Сохранить [Enter]", type="primary", width="stretch"):
@@ -882,8 +888,8 @@ def show_annotation_interface(
             )
             st.success("Сохранено!")
             
-            # Jump to next pending text and SCROLL TOP
-            next_idx = find_next_pending_index(st.session_state.current_text_index, all_texts)
+            # Jump to next pending text within filtered list and SCROLL TOP
+            next_idx = find_next_pending_filtered(current_filtered_index, filtered_texts, text_to_original_index)
             st.session_state.current_text_index = next_idx
             st.session_state.scroll_to_top = True
             st.rerun()
@@ -896,8 +902,8 @@ def show_annotation_interface(
         else:
             if st.button("⏭️ Пропустить [Esc]", width="stretch"):
                 annotation_service.skip_text(text_id, annotator.name)
-                # Jump to next pending text
-                next_idx = find_next_pending_index(st.session_state.current_text_index, all_texts)
+                # Jump to next pending text within filtered list
+                next_idx = find_next_pending_filtered(current_filtered_index, filtered_texts, text_to_original_index)
                 st.session_state.current_text_index = next_idx
                 st.session_state.scroll_to_top = True
                 st.rerun()
