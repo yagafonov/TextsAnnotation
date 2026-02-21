@@ -505,27 +505,47 @@ class StatsService(BaseRepository):
             """
             annotations_df = pd.read_sql_query(annotations_query, conn, params=text_ids)
             
-        # Process candidates: Pivot to separate columns
+        # Build lookups for yes-chosen labels and top-K candidate labels
+        human_labels: dict = (
+            annotations_df.groupby('text_id')['label'].apply(list).to_dict()
+            if not annotations_df.empty else {}
+        )
+        human_yes_sets: dict = {tid: set(labels) for tid, labels in human_labels.items()}
+        top_k_sets: dict = (
+            candidates_df.groupby('text_id')['label'].apply(set).to_dict()
+            if not candidates_df.empty else {}
+        )
+
+        # Process candidates: Pivot to separate columns.
+        # Mark with ✅ if the annotator voted yes for that label.
         for i in range(1, 6):
-            rank_candidates = candidates_df[candidates_df['rank'] == i].set_index('text_id')
-            df[f'Model Top {i}'] = df['id'].map(
-                lambda x: f"{rank_candidates.at[x, 'label']} ({rank_candidates.at[x, 'probability']*100:.1f}%)" 
-                if x in rank_candidates.index else ""
-            )
-            
-        # Process human annotations: Dynamic columns for "Yes" labels
-        # Group by text_id to get list of labels
-        human_labels = annotations_df.groupby('text_id')['label'].apply(list).to_dict()
-        
-        max_labels = 0
-        if human_labels:
-            max_labels = max(len(labels) for labels in human_labels.values())
-            
-        for i in range(max_labels):
-            df[f'Chosen Intent {i+1}'] = df['id'].map(
-                lambda x: human_labels[x][i] if x in human_labels and len(human_labels[x]) > i else ""
-            )
-            
+            rank_df = candidates_df[candidates_df['rank'] == i].set_index('text_id')
+
+            def _fmt_model_top(x, _rank_df=rank_df, _yes=human_yes_sets):
+                if x not in _rank_df.index:
+                    return ""
+                label = _rank_df.at[x, 'label']
+                prob = _rank_df.at[x, 'probability']
+                marker = "✅ " if label in _yes.get(x, set()) else ""
+                return f"{marker}{label} ({prob * 100:.1f}%)"
+
+            df[f'Model Top {i}'] = df['id'].map(_fmt_model_top)
+
+        # Build Additional Intent columns:
+        # yes-chosen labels that are NOT among the top-K candidates for that text.
+        additional_labels: dict = {
+            tid: [lbl for lbl in labels if lbl not in top_k_sets.get(tid, set())]
+            for tid, labels in human_labels.items()
+        }
+        max_additional = max((len(v) for v in additional_labels.values()), default=0)
+
+        for i in range(max_additional):
+            def _fmt_additional(x, _add=additional_labels, _i=i):
+                extras = _add.get(x, [])
+                return extras[_i] if _i < len(extras) else ""
+
+            df[f'Additional Intent {i + 1}'] = df['id'].map(_fmt_additional)
+
         return df
 
     def get_text_count(

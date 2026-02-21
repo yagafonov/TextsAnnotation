@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import quote, urlencode
 
 import altair as alt
-import extra_streamlit_components as stx
+from streamlit_cookies_controller import CookieController
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv, set_key
@@ -64,7 +64,7 @@ DARK_THEME_CSS = """
 if st.query_params.get("dark") == "1":
     st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
 
-cookie_manager = stx.CookieManager(key="admin_cookies")
+cookie_manager = CookieController(key="admin_cookies")
 
 
 def authenticate_admin():
@@ -90,7 +90,7 @@ def authenticate_admin():
             st.success("✅ Администратор авторизован")
             if st.button("🚪 Выйти", width="stretch"):
                 st.session_state.admin_authenticated = False
-                cookie_manager.delete("admin_token")
+                cookie_manager.remove("admin_token")
                 st.rerun()
         return
     
@@ -104,7 +104,7 @@ def authenticate_admin():
                 st.session_state.admin_authenticated = True
                 st.session_state.admin_auth_error = None
                 # Set cookie
-                cookie_manager.set("admin_token", "valid_admin_session", expires_at=datetime.now() + timedelta(days=30))
+                cookie_manager.set("admin_token", "valid_admin_session", expires=datetime.now() + timedelta(days=30))
             else:
                 st.session_state.admin_auth_error = "❌ Неверный пароль"
 
@@ -620,8 +620,8 @@ def show_text_overview(stats_service: StatsService):
     if not df.empty:
         st.write(f"Показано текстов: **{len(df)}** из **{total_count}**")
         
-        # Dynamic columns for human intents start with "Chosen Intent"
-        chosen_cols = [c for c in df.columns if c.startswith("Chosen Intent")]
+        # Dynamic columns for annotator-chosen intents not in model top-K
+        additional_cols = [c for c in df.columns if c.startswith("Additional Intent")]
         model_cols = [f"Model Top {i}" for i in range(1, 6)]
 
         # Map language codes to human-readable names
@@ -639,9 +639,9 @@ def show_text_overview(stats_service: StatsService):
                 "actual_annotators": "Размечали",
                 "cluster": "Кластер",
                 **{c: st.column_config.TextColumn(c, width="medium") for c in model_cols},
-                **{c: st.column_config.TextColumn(c, width="medium") for c in chosen_cols}
+                **{c: st.column_config.TextColumn(c, width="medium") for c in additional_cols}
             },
-            column_order=["id", "text", "language", "assigned_to", "actual_annotators", "cluster"] + model_cols + chosen_cols,
+            column_order=["id", "text", "language", "assigned_to", "actual_annotators", "cluster"] + model_cols + additional_cols,
             hide_index=True,
             width="stretch",
             height="content"
@@ -1053,7 +1053,7 @@ def main():
     # Update persistent state
     if selected_tab:
         if selected_tab != saved_tab:
-            cookie_manager.set("admin_active_tab", selected_tab, expires_at=datetime.now() + timedelta(days=30))
+            cookie_manager.set("admin_active_tab", selected_tab, expires=datetime.now() + timedelta(days=30))
         
         # Keep URL in sync
         if st.query_params.get("tab") != selected_tab:

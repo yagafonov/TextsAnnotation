@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import extra_streamlit_components as stx
+from streamlit_cookies_controller import CookieController
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
@@ -26,6 +26,7 @@ from src.models.annotator import Annotator
 from src.models.candidate import Candidate
 from src.models.intent import Intent
 from src.repositories.intent_repo import IntentRepository
+from src.repositories.user_settings_repo import UserSettingsRepository
 from src.services.annotation_service import AnnotationService
 from src.services.auth_service import AuthService
 from src.services.import_service import ImportService
@@ -56,41 +57,102 @@ DARK_THEME_CSS = """
         --text-color: #fafafa;
         color-scheme: dark;
     }
+
+    /* ── Base ─────────────────────────────────────────────── */
     .stApp, [data-testid="stAppViewContainer"] { background-color: #0e1117; color: #fafafa; }
-    [data-testid="stSidebar"] { background-color: #262730; }
-    [data-testid="stHeader"] { background-color: #0e1117; }
+    [data-testid="stSidebar"]  { background-color: #262730; }
+    [data-testid="stHeader"]   { background-color: #0e1117; }
+
+    /* ── Text / labels ───────────────────────────────────── */
     [data-testid="stSidebar"] [data-testid="stMarkdown"],
     [data-testid="stSidebar"] label,
-    [data-testid="stSidebar"] .stRadio label { color: #fafafa; }
-    .stSelectbox [data-baseweb="select"],
-    .stMultiSelect [data-baseweb="select"] { background-color: #262730; }
-    .stTextInput input, .stTextArea textarea, .stNumberInput input {
-        background-color: #262730; color: #fafafa; border-color: #4a4a5a;
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stMarkdown"], label,
+    .stCheckbox label, .stCheckbox span,
+    [data-testid="stText"], [data-testid="stCaption"],
+    [data-testid="stMetricValue"], [data-testid="stMetricLabel"],
+    [data-testid="stMetricDelta"],
+    p, span, div { color: #fafafa; }
+
+    /* ── Buttons (secondary / ghost) ─────────────────────── */
+    [data-testid="stBaseButton-secondary"],
+    [data-testid="stBaseButton-borderless"],
+    button[kind="secondary"], button[kind="borderless"] {
+        background-color: #262730 !important;
+        color: #fafafa !important;
+        border-color: #4a4a5a !important;
     }
+    [data-testid="stBaseButton-secondary"]:hover,
+    button[kind="secondary"]:hover {
+        background-color: #3a3a4a !important;
+        border-color: #6a6a7a !important;
+    }
+
+    /* ── Inputs ──────────────────────────────────────────── */
+    .stTextInput input, .stTextArea textarea, .stNumberInput input {
+        background-color: #262730 !important; color: #fafafa !important;
+        border-color: #4a4a5a !important;
+    }
+
+    /* ── Select / Multiselect controls ───────────────────── */
+    .stSelectbox div[data-baseweb="select"] > div,
+    .stMultiSelect div[data-baseweb="select"] > div {
+        background-color: #262730 !important;
+        border-color: #4a4a5a !important;
+    }
+    .stSelectbox div[data-baseweb="select"] span,
+    .stSelectbox div[data-baseweb="select"] div,
+    .stMultiSelect div[data-baseweb="select"] span,
+    .stMultiSelect div[data-baseweb="select"] div {
+        background-color: #262730 !important;
+        color: #fafafa !important;
+    }
+    /* Popover dropdown list */
+    div[data-baseweb="popover"] { background-color: #262730 !important; }
+    div[data-baseweb="popover"] ul  { background-color: #262730 !important; }
+    div[data-baseweb="popover"] li  { color: #fafafa !important; }
+    div[data-baseweb="popover"] li:hover { background-color: #3a3a4a !important; }
+    /* Selected tags in multiselect */
+    [data-baseweb="tag"] { background-color: #3a3a4a !important; color: #fafafa !important; }
+    /* Search input inside multiselect / select dropdown */
+    div[data-baseweb="popover"] input,
+    div[data-baseweb="select"] input {
+        background-color: #1e2130 !important;
+        color: #fafafa !important;
+    }
+    div[data-baseweb="popover"] input::placeholder,
+    div[data-baseweb="select"] input::placeholder { color: #9a9aaa !important; }
+
+    /* ── Progress bar text ───────────────────────────────── */
+    [data-testid="stProgressBar"] + div,
+    [data-testid="stProgress"] div, .stProgress div,
+    div[role="progressbar"] + p { color: #fafafa !important; }
+
+    /* ── Tooltip / help icons ────────────────────────────── */
+    [data-testid="stTooltipIcon"] svg path { fill: #9a9aaa !important; }
+    [data-testid="stTooltipContent"] { background-color: #262730 !important; color: #fafafa !important; }
+
+    /* ── Misc ────────────────────────────────────────────── */
     hr { border-color: #4a4a5a; }
-    [data-testid="stMetricValue"], [data-testid="stMetricLabel"] { color: #fafafa; }
     [data-testid="stExpander"] { border-color: #4a4a5a; }
     .stDataFrame, .stTable { color: #fafafa; }
-    div[data-baseweb="popover"] ul { background-color: #262730; }
-    div[data-baseweb="popover"] li:hover { background-color: #3a3a4a; }
+    [data-testid="stNotification"] { background-color: #262730 !important; }
+    /* Intent blocks (bordered containers in body) */
+    div.stMainBlockContainer [data-testid="stLayoutWrapper"] > [data-testid="stVerticalBlock"] {
+        background-color: #262730 !important;
+        border-color: #3a3a4a !important;
+    }
 </style>
 """
 
 if st.query_params.get("dark") == "1":
     st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
 
-# @st.cache_resource removed due to CachedWidgetWarning
-def get_cookie_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_cookie_manager()
+cookie_manager = CookieController()
 
 
 def _sync_settings_from_cookies():
-    """On first load, restore settings from cookies into query params."""
-    if st.session_state.get("_settings_synced"):
-        return
-    st.session_state._settings_synced = True
+    """Restore theme/layout settings from cookies into query params when absent from URL."""
     needs_rerun = False
     ck_dark = cookie_manager.get("dark_mode")
     ck_layout = cookie_manager.get("layout_mode")
@@ -130,7 +192,8 @@ def get_services():
         "auth": AuthService(settings.annotators_path),
         "annotation": AnnotationService(settings.db_path),
         "import": ImportService(settings.db_path),
-        "intent_repo": IntentRepository(settings.db_path)
+        "intent_repo": IntentRepository(settings.db_path),
+        "user_settings": UserSettingsRepository(settings.db_path),
     }
 
 
@@ -184,7 +247,6 @@ def handle_import(services: dict, intents: Dict[str, Intent]):
         st.cache_resource.clear()
     else:
         logger.info("Import completed: no new texts found in CSV")
-        st.info("ℹ️ Нет новых текстов для импорта")
 
 
 def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
@@ -214,7 +276,7 @@ def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
     
     if st.session_state.authenticated_user:
         return st.session_state.authenticated_user
-    
+
     # Show login in sidebar
     with st.sidebar:
         st.header("🔐 Вход")
@@ -241,7 +303,7 @@ def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
                 if annotator:
                     st.session_state.authenticated_user = annotator
                     # Set cookie and query param
-                    cookie_manager.set("annotator_user", annotator.name, expires_at=datetime.now() + timedelta(days=30))
+                    cookie_manager.set("annotator_user", annotator.name, expires=datetime.now() + timedelta(days=30))
                     st.query_params["user"] = annotator.name
                     st.success(f"✅ Добро пожаловать, {annotator.name}!")
                     st.rerun()
@@ -254,28 +316,34 @@ def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
     st.stop()
 
 
+def _apply_user_settings(user_settings_repo: UserSettingsRepository, annotator_name: str) -> None:
+    """Load DB settings for annotator and write to query_params where absent."""
+    saved = user_settings_repo.load(annotator_name)
+    needs_rerun = False
+    if saved.get("dark_mode") and "dark" not in st.query_params:
+        st.query_params["dark"] = saved["dark_mode"]
+        needs_rerun = True
+    if saved.get("layout_mode") and "layout" not in st.query_params:
+        st.query_params["layout"] = saved["layout_mode"]
+        needs_rerun = True
+    if saved.get("selected_label") and "label" not in st.query_params:
+        st.query_params["label"] = saved["selected_label"]
+        needs_rerun = True
+    if needs_rerun:
+        st.rerun()
+
 def show_annotation_interface(
     annotator: Annotator,
     annotation_service: AnnotationService,
-    intents: Dict[str, Intent]
+    intents: Dict[str, Intent],
+    user_settings_repo: UserSettingsRepository,
 ):
     """Main annotation interface."""
     # Initialize scroll state
     if "scroll_to_top" not in st.session_state:
         st.session_state.scroll_to_top = False
-        
-    # Scroll to top if flag is set
-    if st.session_state.scroll_to_top:
-        js = """
-        <script>
-            var body = window.parent.document.querySelector(".main");
-            if (body) body.scrollTop = 0;
-        </script>
-        """
-        components.html(js, height=0)
-        st.session_state.scroll_to_top = False
 
-    st.title("📝 Разметка текстов")
+
     
     # Sidebar
     with st.sidebar:
@@ -301,6 +369,11 @@ def show_annotation_interface(
                 None: "Все",
                 **{s["label"]: f"{s['label']} ({s['annotated']}/{s['total']})" for s in _stats}
             }
+            # FIX 2: restore selected_label from ?label= query param on first load
+            if "selected_label" not in st.session_state:
+                _q_label = st.query_params.get("label")
+                if _q_label in _options:
+                    st.session_state["selected_label"] = _q_label
             _prev_label = st.session_state.get("selected_label")
             _selected = st.selectbox(
                 "Фильтр",
@@ -309,9 +382,16 @@ def show_annotation_interface(
                 key="selected_label",
                 label_visibility="collapsed"
             )
+            # Sync selected label back to query param
+            _cur_label = st.session_state.get("selected_label")
+            if _cur_label:
+                st.query_params["label"] = _cur_label
+            elif "label" in st.query_params:
+                del st.query_params["label"]
             if _selected != _prev_label:
-                # If filter changed, check if current text still fits; if not, reset to 0
+                # If filter changed, check if current text still fits; if not, reset
                 st.session_state["_label_filter_changed"] = True
+                user_settings_repo.save(annotator.name, selected_label=_selected or "")
         else:
             st.write("все")
         
@@ -321,7 +401,7 @@ def show_annotation_interface(
             if st.button("🚪 Выйти", width="stretch"):
                 st.session_state.authenticated_user = None
                 if cookie_manager.get("annotator_user"):
-                    cookie_manager.delete("annotator_user")
+                    cookie_manager.remove("annotator_user")
                 # Clear user param but preserve settings
                 if "user" in st.query_params:
                     del st.query_params["user"]
@@ -331,43 +411,23 @@ def show_annotation_interface(
             if st.button("🌙" if not _is_dark else "☀️", width="stretch", help="Тема"):
                 new_val = "0" if _is_dark else "1"
                 st.query_params["dark"] = new_val
-                cookie_manager.set("dark_mode", new_val, expires_at=datetime.now() + timedelta(days=365))
+                cookie_manager.set("dark_mode", new_val, expires=datetime.now() + timedelta(days=365))
+                user_settings_repo.save(annotator.name, dark_mode=new_val)
                 st.rerun()
         with _c_layout:
             _is_wide = st.query_params.get("layout", "wide") == "wide"
             if st.button("↔️" if not _is_wide else "↕️", width="stretch", help="Широкий/узкий режим"):
                 new_val = "centered" if _is_wide else "wide"
                 st.query_params["layout"] = new_val
-                cookie_manager.set("layout_mode", new_val, expires_at=datetime.now() + timedelta(days=365))
+                cookie_manager.set("layout_mode", new_val, expires=datetime.now() + timedelta(days=365))
+                user_settings_repo.save(annotator.name, layout_mode=new_val)
                 st.rerun()
 
         st.divider()
-        
-        # Resolve active label filter
-        _selected_label = st.session_state.get("selected_label")
-        _use_intents = bool(annotator.intents)
-        _filter_intents = [_selected_label] if _selected_label and _use_intents else (
-            annotator.intents if annotator.intents else None
-        )
-        _filter_clusters = [_selected_label] if _selected_label and not _use_intents else (
-            annotator.clusters if not annotator.intents and annotator.clusters else None
-        )
+        # (Progress shown below, after all_texts is computed)
 
-        # Progress
-        progress = annotation_service.get_progress(
-            annotator=annotator.name,
-            clusters=_filter_clusters,
-            intents=_filter_intents,
-            language=annotator.language
-        )
-        
-        st.metric("📊 Прогресс", f"{progress['done']} / {progress['total']}")
-        
-        if progress['total'] > 0:
-            pct = int(100 * progress['done'] / progress['total'])
-            st.progress(pct / 100, text=f"{pct}%")
-        
     # Get all texts for navigation (respecting selected label filter)
+    # FIX 3: compute navigation list FIRST so progress uses the same set of texts.
     _selected_label = st.session_state.get("selected_label")
     _use_intents = bool(annotator.intents)
     _filter_intents = annotator.intents if annotator.intents else None
@@ -382,6 +442,38 @@ def show_annotation_interface(
         candidate_threshold=settings.annotators_intents_confidence_threshold if _selected_label else 0.0,
         candidate_by_cluster=not _use_intents
     )
+
+    # Universal Scroll to Top on Text Change
+    if all_texts:
+        _curr_id = all_texts[min(st.session_state.current_text_index, len(all_texts)-1)]["id"]
+        if st.session_state.get("last_viewed_text_id") != _curr_id:
+            st.session_state.scroll_to_top = True
+            st.session_state.last_viewed_text_id = _curr_id
+
+    if st.session_state.scroll_to_top:
+        js = """
+        <script>
+            var body = window.parent.document.querySelector(".main");
+            if (body) body.scrollTop = 0;
+        </script>
+        """
+        components.html(js, height=0)
+        st.session_state.scroll_to_top = False
+
+    # Progress: global — all annotated / all assigned (ignores active filter)
+    _global_progress = annotation_service.get_progress(
+        annotator=annotator.name,
+        language=annotator.language
+    )
+    with st.sidebar:
+        _g_done = _global_progress["done"]
+        _g_total = _global_progress["total"]
+        st.metric("📊 Прогресс", f"{_g_done} / {_g_total}")
+        if _g_total > 0:
+            _pct = int(100 * _g_done / _g_total)
+            st.progress(_pct / 100, text=f"{_pct}%")
+        _scope_word = "интенты" if annotator.intents else "кластеры"
+        st.caption(f"размечено / назначено (все {_scope_word})")
     
     if not all_texts:
         st.success("🎉 Нет текстов для разметки!")
@@ -592,8 +684,31 @@ def show_annotation_interface(
             st.rerun()
 
     with col_status:
-        # Centered text ID
-        st.markdown(f"<div style='text-align: center; margin-bottom: 5px;'>Текст {current_filtered_index + 1} из {len(filtered_texts)}</div>", unsafe_allow_html=True)
+        # Centered text counter + filter description
+        _scope_label = st.session_state.get("selected_label")
+        _scope_kind  = "Интент" if annotator.intents else "Кластер"
+        _label_part  = f"{_scope_kind}: {_scope_label}. " if _scope_label else ""
+
+        # Build status description from checkbox flags
+        _flags = (show_annotated, show_pending, show_skipped)
+        _status_desc = {
+            (True,  True,  True ): "все",
+            (False, True,  False): "только неразмеченные без пропусков",
+            (False, True,  True ): "неразмеченные",
+            (False, False, True ): "только пропущенные",
+            (True,  False, False): "только размеченные",
+            (True,  True,  False): "все без пропусков",
+            (True,  False, True ): "размеченные и пропущенные",
+            (False, False, False): "нет фильтров",
+        }.get(_flags, "все")
+
+        st.markdown(
+            f"<div style='text-align:center;margin-bottom:2px;'>"
+            f"Текст {current_filtered_index + 1} из {len(filtered_texts)}</div>"
+            f"<div style='text-align:center;font-size:0.78em;opacity:0.6;margin-bottom:5px;'>"
+            f"{_label_part}{_status_desc}</div>",
+            unsafe_allow_html=True
+        )
         
         # Centered status badge
         if is_skipped_status:
@@ -619,9 +734,7 @@ def show_annotation_interface(
                 unsafe_allow_html=True
             )
 
-    
     # Display text
-    st.subheader("Текст для разметки:")
     # st.info(text_content) replaced with custom markdown to fit content width
     st.markdown(
         f"""
@@ -657,7 +770,7 @@ def show_annotation_interface(
         shown_items = sorted(shown_map.values(), key=lambda x: x[0].label)
 
     # Collect decisions
-    st.subheader("Выберите подходящие интенты:")
+
 
     # Inject JS for arrow key navigation, auto-focus, and Enter to Save
     js_script = f"""
@@ -787,12 +900,12 @@ def show_annotation_interface(
             const stripHints = () => {{
                 pDoc.querySelectorAll('button').forEach(btn => {{
                     btn.textContent = btn.textContent
-                        .replace(/\s*\[Enter\]/g, '')
-                        .replace(/\s*\[Esc\]/g, '')
-                        .replace(/\s*\+\s*⌘/g, '')
-                        .replace(/\s*⌘\s*\+\s*/g, '')
-                        .replace(/\s*\+\s*Ctrl/g, '')
-                        .replace(/\s*Ctrl\s*\+\s*/g, '');
+                        .replace(/\\s*\\[Enter\\]/g, '')
+                        .replace(/\\s*\\[Esc\\]/g, '')
+                        .replace(/\\s*\\+\\s*⌘/g, '')
+                        .replace(/\\s*⌘\\s*\\+\\s*/g, '')
+                        .replace(/\\s*\\+\\s*Ctrl/g, '')
+                        .replace(/\\s*Ctrl\\s*\\+\\s*/g, '');
                 }});
             }};
             [100, 300, 600, 1000].forEach(delay => setTimeout(stripHints, delay));
@@ -806,6 +919,18 @@ def show_annotation_interface(
     candidate_labels = list(shown_map.keys())
     shown_intents_source = {}
 
+    _is_dark = st.query_params.get("dark") == "1"
+    # Background for intent blocks — targets both wrapper and inner content div
+    _block_bg = "#262730" if _is_dark else "#f0f2f6"
+    _block_border = "#3a3a4a" if _is_dark else "#d0d4dd"
+    st.markdown(
+        f"<style>"
+        f"div.stMainBlockContainer [data-testid='stLayoutWrapper'] > [data-testid='stVerticalBlock']"
+        f"{{background-color:{_block_bg}!important;}}"
+        f"</style>",
+        unsafe_allow_html=True,
+    )
+
     for candidate, source in shown_items:
         intent = intents.get(candidate.label)
         if not intent:
@@ -814,31 +939,37 @@ def show_annotation_interface(
         pct = int(candidate.probability * 100)
         label_text = f"**{candidate.label}** ({pct}%)" if _show_conf else f"**{candidate.label}**"
 
-        decision = st.checkbox(
-            label_text,
-            key=f"cand_{candidate.label}_{text_id}"
-        )
-
-        if intent.description:
-            st.caption(f"**Описание:** {intent.description}")
-            if intent.train:
-                examples = " | ".join(intent.train[:5])
-                st.caption(f"**Примеры:** {examples}")
+        with st.container(border=True):
+            decision = st.checkbox(
+                label_text,
+                key=f"cand_{candidate.label}_{text_id}"
+            )
+            if intent.description:
+                st.caption(f"**Описание:** {intent.description}")
+                if intent.train:
+                    examples = " | ".join(intent.train[:5])
+                    st.caption(f"**Примеры:** {examples}")
         decisions[candidate.label] = "yes" if decision else "no"
         shown_intents_source[candidate.label] = source
-        st.write("")
 
     # Extra intents
-    st.divider()
-    available_intents = [label for label, intent in intents.items()
-                        if (not annotator.clusters or intent.cluster in annotator.clusters)
-                        and label not in candidate_labels]
-    
-    # Custom formatter with bold intent names
+    # FIX 4: inject CSS so the first part (intent name) appears bold in the dropdown,
+    # while format_func returns plain text so the name stays searchable.
+    st.markdown("""
+    <style>
+    /* Bold intent name in the Additional Intents multiselect dropdown */
+    div[data-baseweb="popover"] ul li div span {
+        font-weight: 600;
+    }
+    </style>""", unsafe_allow_html=True)
+    available_intents = sorted(
+        [label for label in intents if label not in candidate_labels]
+    )
+
     def format_intent_option(label):
         intent = intents.get(label)
-        desc = f" | {intent.description}" if intent and intent.description else ""
-        return f"{to_bold(label)}{desc}"
+        desc = f" {intent.description}" if intent and intent.description else ""
+        return f"[{label}]{desc}"
 
     extra_labels = st.multiselect(
         "Добавить дополнительные интенты:",
@@ -891,7 +1022,6 @@ def show_annotation_interface(
             # Jump to next pending text within filtered list and SCROLL TOP
             next_idx = find_next_pending_filtered(current_filtered_index, filtered_texts, text_to_original_index)
             st.session_state.current_text_index = next_idx
-            st.session_state.scroll_to_top = True
             st.rerun()
     
     with col2:
@@ -905,7 +1035,6 @@ def show_annotation_interface(
                 # Jump to next pending text within filtered list
                 next_idx = find_next_pending_filtered(current_filtered_index, filtered_texts, text_to_original_index)
                 st.session_state.current_text_index = next_idx
-                st.session_state.scroll_to_top = True
                 st.rerun()
 
 
@@ -948,9 +1077,13 @@ def main():
 
     annotator = authenticate_user(auth_service)
 
+    # Apply per-user DB settings (cross-device persistence)
+    user_settings_repo: UserSettingsRepository = services["user_settings"]
+    _apply_user_settings(user_settings_repo, annotator.name)
+
     # Show annotation interface
     annotation_service: AnnotationService = services["annotation"]
-    show_annotation_interface(annotator, annotation_service, intents)
+    show_annotation_interface(annotator, annotation_service, intents, user_settings_repo)
 
 
 if __name__ == "__main__":

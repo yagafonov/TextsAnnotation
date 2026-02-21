@@ -261,6 +261,16 @@ def init_database(db_path: str) -> None:
             CREATE UNIQUE INDEX IF NOT EXISTS shown_intents_unique_entry
             ON shown_intents (text_id, annotator, label)
         """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_settings (
+                annotator TEXT PRIMARY KEY,
+                dark_mode TEXT,
+                layout_mode TEXT,
+                selected_label TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
         
         # Schema Migrations (Compatibility with legacy dumps)
         logger.debug("Checking for schema migrations")
