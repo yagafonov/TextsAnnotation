@@ -443,22 +443,6 @@ def show_annotation_interface(
         candidate_by_cluster=not _use_intents
     )
 
-    # Universal Scroll to Top on Text Change
-    if all_texts:
-        _curr_id = all_texts[min(st.session_state.current_text_index, len(all_texts)-1)]["id"]
-        if st.session_state.get("last_viewed_text_id") != _curr_id:
-            st.session_state.scroll_to_top = True
-            st.session_state.last_viewed_text_id = _curr_id
-
-    if st.session_state.scroll_to_top:
-        js = """
-        <script>
-            var body = window.parent.document.querySelector(".main");
-            if (body) body.scrollTop = 0;
-        </script>
-        """
-        components.html(js, height=0)
-        st.session_state.scroll_to_top = False
 
     # Progress: global — all annotated / all assigned (ignores active filter)
     _global_progress = annotation_service.get_progress(
@@ -512,6 +496,23 @@ def show_annotation_interface(
     # Ensure index is within bounds (e.g. after filter change)
     if st.session_state.current_text_index >= len(all_texts):
         st.session_state.current_text_index = 0
+
+    # Universal Scroll to Top on Text Change (Now safe after initialization)
+    if all_texts:
+        _curr_id = all_texts[min(st.session_state.current_text_index, len(all_texts)-1)]["id"]
+        if st.session_state.get("last_viewed_text_id") != _curr_id:
+            st.session_state.scroll_to_top = True
+            st.session_state.last_viewed_text_id = _curr_id
+
+    if st.session_state.scroll_to_top:
+        js = """
+        <script>
+            var body = window.parent.document.querySelector(".main");
+            if (body) body.scrollTop = 0;
+        </script>
+        """
+        components.html(js, height=0)
+        st.session_state.scroll_to_top = False
 
         
     # Sidebar navigation dropdown
