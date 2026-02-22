@@ -522,7 +522,7 @@ def show_annotation_interface(
     # Filters
     col_f1, col_f2, col_f3 = st.sidebar.columns(3)
     with col_f1:
-        show_annotated = st.checkbox("✅", value=True, help="Размеченные")
+        show_annotated = st.checkbox("✅", value=False, help="Размеченные")
     with col_f2:
         show_pending = st.checkbox("⬜️", value=True, help="Ожидающие")
     with col_f3:
