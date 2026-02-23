@@ -855,15 +855,30 @@ def show_annotation_interface(
                 return false;
             }}
 
+            // 3.1 Right Arrow (toggle examples)
+            if (e.key === 'ArrowRight' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {{
+                if (active.type === 'checkbox') {{
+                    const container = active.closest('div[data-testid="stVerticalBlockBorderWrapper"]');
+                    if (container) {{
+                        const expander = container.querySelector('details[data-testid="stExpander"] summary');
+                        if (expander) {{
+                            e.preventDefault();
+                            e.stopImmediatePropagation();
+                            expander.click();
+                        }}
+                    }}
+                }}
+            }}
+
             // 4. Arrow Keys (checkbox navigation)
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {{
+            if (['ArrowUp', 'ArrowDown'].includes(e.key)) {{
                 if (active.type === 'checkbox') {{
                     const cbs = getCBs();
                     const idx = cbs.indexOf(active);
                     if (idx !== -1) {{
                         let nextIdx = idx;
-                        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') nextIdx++;
-                        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') nextIdx--;
+                        if (e.key === 'ArrowDown') nextIdx++;
+                        if (e.key === 'ArrowUp') nextIdx--;
                         
                         if (nextIdx >= 0 && nextIdx < cbs.length) {{
                             e.preventDefault();
