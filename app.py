@@ -951,8 +951,8 @@ def show_annotation_interface(
             all_examples = intent.train + intent.test
             if all_examples:
                 with st.expander("📝 Примеры"):
-                    for ex in all_examples:
-                        st.markdown(f"- {ex}")
+                    examples_md = "\n".join([f"- {ex}" for ex in all_examples])
+                    st.markdown(examples_md)
         decisions[candidate.label] = "yes" if decision else "no"
         shown_intents_source[candidate.label] = source
 
