@@ -858,7 +858,8 @@ def show_annotation_interface(
             // 3.1 Right Arrow (toggle examples)
             if (e.key === 'ArrowRight' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {{
                 if (active.type === 'checkbox') {{
-                    const container = active.closest('div[data-testid="stVerticalBlockBorderWrapper"]');
+                    // stVerticalBlock is the container for the group (checkbox + caption + expander)
+                    const container = active.closest('div[data-testid="stVerticalBlock"]');
                     if (container) {{
                         const expander = container.querySelector('details[data-testid="stExpander"] summary');
                         if (expander) {{
