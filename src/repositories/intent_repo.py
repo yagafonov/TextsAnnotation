@@ -43,6 +43,7 @@ class IntentRepository(BaseRepository):
                         label=label,
                         description=payload.get("description", ""),
                         train=payload.get("train", []),
+                        test=payload.get("test", []),
                         complexity=payload.get("complexity", ""),
                         cluster=payload["cluster"],
                         source_file=filename
@@ -59,6 +60,7 @@ class IntentRepository(BaseRepository):
                     label=label,
                     description=payload.get("description", ""),
                     train=payload.get("train", []),
+                    test=payload.get("test", []),
                     complexity=payload.get("complexity", ""),
                     cluster=payload.get("cluster", "unknown"),
                     source_file=filename
@@ -75,14 +77,16 @@ class IntentRepository(BaseRepository):
             intent: Intent to upsert
         """
         with get_connection(self.db_path) as conn:
-            examples_str = ", ".join(intent.train)
+            train_str = ", ".join(intent.train)
+            test_str = ", ".join(intent.test)
             conn.execute(
                 """
-                INSERT INTO intents (label, description, examples, complexity, cluster, source_file, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                INSERT INTO intents (label, description, examples, test_examples, complexity, cluster, source_file, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(label) DO UPDATE SET
                     description=excluded.description,
                     examples=excluded.examples,
+                    test_examples=excluded.test_examples,
                     complexity=excluded.complexity,
                     cluster=excluded.cluster,
                     source_file=excluded.source_file,
@@ -91,7 +95,8 @@ class IntentRepository(BaseRepository):
                 (
                     intent.label,
                     intent.description,
-                    examples_str,
+                    train_str,
+                    test_str,
                     intent.complexity,
                     intent.cluster,
                     intent.source_file or ""
@@ -120,6 +125,7 @@ class IntentRepository(BaseRepository):
                 label=row["label"],
                 description=row["description"],
                 train=[ex.strip() for ex in row["examples"].split(",") if ex.strip()],
+                test=[ex.strip() for ex in row["test_examples"].split(",") if ex.strip()] if row["test_examples"] else [],
                 complexity=row["complexity"],
                 cluster=row["cluster"],
                 source_file=row["source_file"]
@@ -140,6 +146,7 @@ class IntentRepository(BaseRepository):
                     label=row["label"],
                     description=row["description"],
                     train=[ex.strip() for ex in row["examples"].split(",") if ex.strip()],
+                    test=[ex.strip() for ex in row["test_examples"].split(",") if ex.strip()] if row["test_examples"] else [],
                     complexity=row["complexity"],
                     cluster=row["cluster"],
                     source_file=row["source_file"]
@@ -167,6 +174,7 @@ class IntentRepository(BaseRepository):
                     label=row["label"],
                     description=row["description"],
                     train=[ex.strip() for ex in row["examples"].split(",") if ex.strip()],
+                    test=[ex.strip() for ex in row["test_examples"].split(",") if ex.strip()] if row["test_examples"] else [],
                     complexity=row["complexity"],
                     cluster=row["cluster"],
                     source_file=row["source_file"]

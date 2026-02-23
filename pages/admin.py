@@ -816,6 +816,22 @@ def show_export_section(stats_service: StatsService):
 def show_import_section():
     """Display import options with file upload."""
     st.header("📥 Импорт данных")
+
+    # Intent synchronization button
+    with st.expander("🎯 Управление интентами", expanded=True):
+        st.write("Синхронизация обновляет описания и примеры интентов из YAML файлов в базу данных.")
+        if st.button("🔃 Синхронизировать интенты из YAML", use_container_width=True):
+            with st.spinner("Синхронизация интентов..."):
+                try:
+                    intent_repo = IntentRepository(settings.db_path)
+                    intents = intent_repo.load_from_yaml(settings.intents_path)
+                    for intent in intents.values():
+                        intent_repo.upsert(intent)
+                    st.success(f"✅ Успешно синхронизировано {len(intents)} интентов.")
+                except Exception as e:
+                    st.error(f"❌ Ошибка при синхронизации: {e}")
+
+    st.divider()
     
     # Create uploads directory if it doesn't exist
     uploads_dir = Path("data/uploads")

@@ -220,6 +220,7 @@ def init_database(db_path: str) -> None:
                 label TEXT PRIMARY KEY,
                 description TEXT,
                 examples TEXT,
+                test_examples TEXT,
                 complexity TEXT,
                 cluster TEXT,
                 source_file TEXT,
@@ -281,6 +282,9 @@ def init_database(db_path: str) -> None:
             if ensure_column(conn, "texts", "language", "TEXT"): migration_applied = True
             if ensure_column(conn, "texts", "assigned_to", "TEXT"): migration_applied = True
             if ensure_column(conn, "texts", "is_skipped", "INTEGER NOT NULL DEFAULT 0"): migration_applied = True
+            
+            # Table 'intents' migrations
+            if ensure_column(conn, "intents", "test_examples", "TEXT"): migration_applied = True
 
             # Backfill is_skipped from skipped_texts table
             conn.execute("""

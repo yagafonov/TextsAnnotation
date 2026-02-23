@@ -947,9 +947,12 @@ def show_annotation_interface(
             )
             if intent.description:
                 st.caption(f"**Описание:** {intent.description}")
-                if intent.train:
-                    examples = " | ".join(intent.train[:5])
-                    st.caption(f"**Примеры:** {examples}")
+            
+            all_examples = intent.train + intent.test
+            if all_examples:
+                with st.expander("📝 Примеры"):
+                    for ex in all_examples:
+                        st.markdown(f"- {ex}")
         decisions[candidate.label] = "yes" if decision else "no"
         shown_intents_source[candidate.label] = source
 
