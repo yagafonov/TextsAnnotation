@@ -354,7 +354,30 @@ class AnnotationService:
             scores = self._score_annotators(candidates, annotators, language)
 
             if not scores:
-                # No annotator matched → leave unassigned
+                # Fallback: find all annotators matching the text's language
+                text_lang = (language or "").strip().lower()
+                lang_matched = [
+                    ann.name for ann in annotators
+                    if (ann.language or "").strip().lower() == text_lang
+                ]
+                
+                if not lang_matched:
+                    # No language match either → leave unassigned
+                    continue
+                
+                # Resolve via load-balancing on language-matched annotators
+                min_count = min(running_counts[name] for name in lang_matched)
+                candidates_with_min = [
+                    name for name in lang_matched if running_counts[name] == min_count
+                ]
+                
+                if len(candidates_with_min) == 1:
+                    winner = candidates_with_min[0]
+                else:
+                    winner = rng.choice(sorted(candidates_with_min))
+                
+                clear_assignments.append((text_id, winner))
+                running_counts[winner] += 1
                 continue
 
             max_score = max(scores.values())
@@ -366,6 +389,7 @@ class AnnotationService:
 
             if len(winners) == 1:
                 clear_assignments.append((text_id, winners[0]))
+                running_counts[winners[0]] += 1
             else:
                 mask = 0
                 for name in winners:
@@ -373,11 +397,10 @@ class AnnotationService:
                     mask |= 1 << (n - 1 - i)
                 tie_queue.append((text_id, mask, winners))
 
-        # Apply clear assignments and update running counts
+        # Apply clear assignments
         updates: Dict[int, str] = {}
         for text_id, winner in clear_assignments:
             updates[text_id] = winner
-            running_counts[winner] += 1
 
         # --- Phase 2: sort tie queue by bitmask (groups same competitor sets) ---
         tie_queue.sort(key=lambda t: t[1])
