@@ -142,6 +142,21 @@ DARK_THEME_CSS = """
         background-color: #262730 !important;
         border-color: #3a3a4a !important;
     }
+
+    /* ── Sticky Action Buttons ───────────────────────────── */
+    div[data-testid="stHorizontalBlock"]:has(button[kind="primary"]) {
+        position: sticky;
+        bottom: -20px;
+        background-color: #0e1117 !important;
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+        z-index: 99;
+        border-top: 1px solid rgba(250, 250, 250, 0.1);
+        margin-left: -1rem;
+        margin-right: -1rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
 </style>
 """
 
