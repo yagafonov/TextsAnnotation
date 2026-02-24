@@ -818,7 +818,10 @@ def show_annotation_interface(
 
             // 2. Enter key
             if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {{
-                if (!isInput && active.tagName !== 'BUTTON') {{
+                const isMultiselect = active.tagName === 'INPUT' && active.closest('.stMultiSelect');
+                const isEmptyMultiselect = isMultiselect && active.value === '';
+
+                if ((!isInput || isEmptyMultiselect) && active.tagName !== 'BUTTON') {{
                     const btn = pDoc.querySelector('button[kind="primary"]');
                     if (btn) {{
                         e.preventDefault();
@@ -1068,30 +1071,32 @@ def ensure_assignments(annotators_hash: str, _annotation_service: AnnotationServ
 
 def main():
     """Main application entry point."""
-    # Initialize
-    intents = initialize_app()
-    services = get_services()
-    
-    # Handle import
-    if os.path.exists(settings.import_csv_path):
-        if "import_done" not in st.session_state:
-            handle_import(services, intents)
-            st.session_state.import_done = True
-    else:
-        if "import_done" not in st.session_state:
-            logger.info(f"No CSV found at {settings.import_csv_path}, skipping automatic import.")
-            st.session_state.import_done = True
-    
-    # Authenticate
-    auth_service: AuthService = services["auth"]
-    
-    # Trigger rebalancing if needed
-    # We use a hash of the annotators config to detect changes
-    config = auth_service.load_annotators()
-    # Simple hash: names + intents
-    # If intents change, assignments might change.
-    annotators_repr = "".join(sorted([f"{a.name}:{','.join(sorted(a.intents))}" for a in config.annotators]))
-    ensure_assignments(annotators_repr, services["annotation"], auth_service)
+    # Initialize with status visibility
+    with st.status("🚀 Запуск приложения...", expanded=True) as status:
+        st.write("📂 Подготовка базы данных и интентов...")
+        intents = initialize_app()
+        
+        st.write("⚙️ Настройка сервисов...")
+        services = get_services()
+        
+        # Handle import
+        if os.path.exists(settings.import_csv_path):
+            if "import_done" not in st.session_state:
+                st.write("📥 Проверка и импорт новых текстов...")
+                handle_import(services, intents)
+                st.session_state.import_done = True
+        else:
+            if "import_done" not in st.session_state:
+                st.session_state.import_done = True
+        
+        # Trigger rebalancing if needed
+        st.write("⚖️ Балансировка назначений...")
+        auth_service: AuthService = services["auth"]
+        config = auth_service.load_annotators()
+        annotators_repr = "".join(sorted([f"{a.name}:{','.join(sorted(a.intents))}" for a in config.annotators]))
+        ensure_assignments(annotators_repr, services["annotation"], auth_service)
+        
+        status.update(label="✅ Инициализация завершена", state="complete", expanded=False)
     
     _sync_settings_from_cookies()
 
