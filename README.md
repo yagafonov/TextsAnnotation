@@ -55,14 +55,26 @@ cp .env.example .env
 
 All parameters can also be edited from the **Admin > Settings** tab at runtime.
 
-### Running the Application
-
 ```bash
-streamlit run app.py
-
 # Admin dashboard: http://localhost:8501/admin
 # Default password: admin123
 ```
+
+### Docker Setup (Recommended)
+
+Running via Docker ensures all environment dependencies are correctly handled:
+
+1. **Build and start**:
+   ```bash
+   docker-compose up --build -d
+   ```
+2. **Access**:
+   The app will be available at [http://localhost:8501](http://localhost:8501).
+
+3. **Logs**:
+   ```bash
+   docker-compose logs -f
+   ```
 
 ## User Management
 
