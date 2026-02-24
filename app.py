@@ -861,7 +861,7 @@ def show_annotation_interface(
                     // stVerticalBlock is the container for the group (checkbox + caption + expander)
                     const container = active.closest('div[data-testid="stVerticalBlock"]');
                     if (container) {{
-                        const expander = container.querySelector('details[data-testid="stExpander"] summary');
+                        const expander = container.querySelector('[data-testid="stExpander"] summary');
                         if (expander) {{
                             e.preventDefault();
                             e.stopImmediatePropagation();
