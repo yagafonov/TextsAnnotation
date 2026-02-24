@@ -675,14 +675,12 @@ def show_text_overview(stats_service: StatsService):
                 with pg_cols[0]:
                     if st.button("⏪", disabled=(page_number == 1), key="pg_first", width="stretch"):
                         st.session_state.text_overview_page = 1
-                        st.session_state.pg_jump_select = 1
                         st.rerun()
                 
                 with pg_cols[1]:
                     if st.button("◀️", disabled=(page_number == 1), key="pg_prev", width="stretch"):
                         new_pg = max(1, page_number - 1)
                         st.session_state.text_overview_page = new_pg
-                        st.session_state.pg_jump_select = new_pg
                         st.rerun()
                 
                 with pg_cols[2]:
@@ -704,7 +702,6 @@ def show_text_overview(stats_service: StatsService):
                             width="stretch"
                         ):
                             st.session_state.text_overview_page = p
-                            st.session_state.pg_jump_select = p
                             st.rerun()
                     
                     # 2. Jump to page dropdown (compact version)
@@ -725,13 +722,11 @@ def show_text_overview(stats_service: StatsService):
                     if st.button("▶️", disabled=(page_number == total_pages), key="pg_next", width="stretch"):
                         new_pg = min(total_pages, page_number + 1)
                         st.session_state.text_overview_page = new_pg
-                        st.session_state.pg_jump_select = new_pg
                         st.rerun()
                         
                 with pg_cols[4]:
                     if st.button("⏩", disabled=(page_number == total_pages), key="pg_last", width="stretch"):
                         st.session_state.text_overview_page = total_pages
-                        st.session_state.pg_jump_select = total_pages
                         st.rerun()
     
     with b_col2:
