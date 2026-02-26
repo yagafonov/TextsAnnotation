@@ -143,19 +143,24 @@ DARK_THEME_CSS = """
         border-color: #3a3a4a !important;
     }
 
-    /* ── Sticky Action Buttons ───────────────────────────── */
+    /* ── Floating Action Buttons (Fixed at bottom) ───────── */
     div[data-testid="stHorizontalBlock"]:has(button[kind="primary"]) {
-        position: sticky;
-        bottom: -20px;
+        position: fixed;
+        bottom: 0px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        max-width: 736px; /* Matches Streamlit's default centered width */
+        z-index: 999;
         background-color: #0e1117 !important;
-        padding-top: 1rem;
-        padding-bottom: 2rem;
-        z-index: 99;
+        padding: 1.5rem 1rem 2rem 1rem;
         border-top: 1px solid rgba(250, 250, 250, 0.1);
-        margin-left: -1rem;
-        margin-right: -1rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
+        box-shadow: 0 -10px 20px rgba(0,0,0,0.5);
+    }
+    
+    /* Add padding to the bottom of the main section so content isn't hidden behind the floating buttons */
+    section.stMain > div.stMainBlockContainer {
+        padding-bottom: 120px !important;
     }
 </style>
 """
