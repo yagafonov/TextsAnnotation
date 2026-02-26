@@ -158,6 +158,13 @@ DARK_THEME_CSS = """
         box-shadow: 0 -10px 20px rgba(0,0,0,0.5);
     }
     
+    /* Make the primary (Save) button look like a secondary (Skip) button */
+    div[data-testid="stHorizontalBlock"] button[kind="primary"] {
+        background-color: #262730 !important;
+        color: #fafafa !important;
+        border-color: #4a4a5a !important;
+    }
+
     /* Add padding to the bottom of the main section so content isn't hidden behind the floating buttons */
     section.stMain > div.stMainBlockContainer {
         padding-bottom: 120px !important;
@@ -418,7 +425,7 @@ def show_annotation_interface(
         # Settings row
         _c_logout, _c_dark, _c_layout = st.columns([2, 1, 1])
         with _c_logout:
-            if st.button("🚪 Выйти", width="stretch"):
+            if st.button("Выйти", width="stretch"):
                 st.session_state.authenticated_user = None
                 if cookie_manager.get("annotator_user"):
                     cookie_manager.remove("annotator_user")
@@ -759,7 +766,7 @@ def show_annotation_interface(
     # st.info(text_content) replaced with custom markdown to fit content width
     st.markdown(
         f"""
-        <div style="background-color: #e6f3ff; color: #004085; padding: 1rem; border-radius: 0.5rem; border: 1px solid #b8daff; width: fit-content; max_width: 100%; margin-bottom: 1rem;">
+        <div style="background-color: #e6f3ff; color: #004085; padding: 1rem; border-radius: 0.5rem; border: 1px solid #b8daff; width: fit-content; max_width: 100%; margin-bottom: 1rem; font-weight: bold; font-size: 1.1rem;">
             {html.escape(text_content)}
         </div>
         """,
