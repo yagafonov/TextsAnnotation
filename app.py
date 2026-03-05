@@ -179,8 +179,11 @@ cookie_manager = CookieController()
 def _sync_settings_from_cookies():
     """Restore theme/layout settings from cookies into query params when absent from URL."""
     needs_rerun = False
-    ck_dark = cookie_manager.get("dark_mode")
-    ck_layout = cookie_manager.get("layout_mode")
+    try:
+        ck_dark = cookie_manager.get("dark_mode")
+        ck_layout = cookie_manager.get("layout_mode")
+    except TypeError:
+        return
     if ck_dark is not None and "dark" not in st.query_params:
         st.query_params["dark"] = ck_dark
         needs_rerun = True
@@ -979,7 +982,7 @@ def show_annotation_interface(
             )
             if intent.description:
                 st.caption(f"**Описание:** {intent.description}")
-            
+
             all_examples = intent.train + intent.test
             if all_examples:
                 with st.expander("📝 Примеры"):
@@ -989,33 +992,66 @@ def show_annotation_interface(
         shown_intents_source[candidate.label] = source
 
     # Extra intents
-    # FIX 4: inject CSS so the first part (intent name) appears bold in the dropdown,
-    # while format_func returns plain text so the name stays searchable.
-    st.markdown("""
-    <style>
-    /* Bold intent name in the Additional Intents multiselect dropdown */
-    div[data-baseweb="popover"] ul li div span {
-        font-weight: 600;
-    }
-    </style>""", unsafe_allow_html=True)
-    available_intents = sorted(
-        [label for label in intents if label not in candidate_labels]
-    )
-
     def format_intent_option(label):
         intent = intents.get(label)
         desc = f" {intent.description}" if intent and intent.description else ""
         return f"[{label}]{desc}"
 
-    extra_labels = st.multiselect(
-        "Добавить дополнительные интенты:",
-        options=available_intents,
-        format_func=format_intent_option
+    _extra_key = f"_extra_{text_id}"
+    if _extra_key not in st.session_state:
+        st.session_state[_extra_key] = []
+    extra_labels: list = st.session_state[_extra_key]
+
+    # Show checkboxes for already-added extra intents (with remove button)
+    for extra_label in list(extra_labels):
+        intent = intents.get(extra_label)
+        if not intent:
+            continue
+        with st.container(border=True):
+            _ecol1, _ecol2 = st.columns([6, 1])
+            with _ecol1:
+                _extra_decision = st.checkbox(
+                    f"**{extra_label}** ➕",
+                    value=True,
+                    key=f"cand_{extra_label}_{text_id}",
+                )
+                if intent.description:
+                    st.caption(f"**Описание:** {intent.description}")
+                all_examples = intent.train + intent.test
+                if all_examples:
+                    with st.expander("📝 Примеры"):
+                        examples_md = "\n".join([f"- {ex}" for ex in all_examples])
+                        st.markdown(examples_md)
+            with _ecol2:
+                if st.button("✕", key=f"_remove_extra_{extra_label}_{text_id}", help="Убрать"):
+                    st.session_state[_extra_key].remove(extra_label)
+                    st.rerun()
+            decisions[extra_label] = "yes" if _extra_decision else "no"
+        shown_intents_source[extra_label] = "extra"
+
+    _available = sorted(
+        [label for label in intents if label not in candidate_labels and label not in extra_labels]
     )
-    
-    for extra in extra_labels:
-        shown_intents_source[extra] = "extra"
-    
+    _select_key = f"_extra_select_{text_id}"
+    _placeholder = "Выберите интент..."
+
+    def _on_extra_change():
+        selected = st.session_state.get(_select_key)
+        if selected and selected != _placeholder and selected not in st.session_state[_extra_key]:
+            st.session_state[_extra_key].append(selected)
+        st.session_state[_select_key] = _placeholder
+
+    if _select_key not in st.session_state:
+        st.session_state[_select_key] = _placeholder
+
+    st.selectbox(
+        "Добавить дополнительные интенты:",
+        options=[_placeholder] + _available,
+        format_func=lambda x: x if x == _placeholder else format_intent_option(x),
+        key=_select_key,
+        on_change=_on_extra_change,
+    )
+
     # Action buttons
     col1, col2 = st.columns(2)
     
