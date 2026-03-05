@@ -180,7 +180,6 @@ All settings can be configured via `.env` file or the Admin Settings tab:
 | `ANNOTATORS_INTENTS_CONFIDENCE_THRESHOLD` | `0.4` | Min confidence to show intent to annotator (0–1) |
 | `TEXTS_INTENTS_PATH` | `data/intents` | Intent YAML definitions directory |
 | `TEXTS_ANNOTATORS_PATH` | `data/annotators.yaml` | Annotator config file |
-| `TEXTS_IMPORT_CSV_PATH` | `data/requests.csv` | Default CSV import file |
 | `TEXTS_ADMIN_PASSWORD` | `admin123` | Admin dashboard password |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR) |
 | `LOG_FILE` | `logs/app.log` | Log file path |

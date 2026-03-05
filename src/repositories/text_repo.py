@@ -274,7 +274,8 @@ class TextRepository(BaseRepository):
         language: Optional[str] = None,
         candidate_label: Optional[str] = None,
         candidate_threshold: float = 0.0,
-        candidate_by_cluster: bool = False
+        candidate_by_cluster: bool = False,
+        uncategorized_threshold: Optional[float] = None
     ) -> List[dict]:
         """Get all texts with status for an annotator.
         
@@ -358,6 +359,16 @@ class TextRepository(BaseRepository):
                     """)
                 params.extend([candidate_label, candidate_threshold])
 
+            # Uncategorized filter: texts with no candidate above threshold
+            if uncategorized_threshold is not None:
+                filters.append("""
+                    NOT EXISTS (
+                        SELECT 1 FROM candidates c
+                        WHERE c.text_id = t.id AND c.probability >= ?
+                    )
+                """)
+                params.append(uncategorized_threshold)
+
             where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
             query = f"{base_query} {where_clause} ORDER BY t.id ASC"
             
@@ -429,3 +440,72 @@ class TextRepository(BaseRepository):
                 results.append({"label": label, "total": total, "annotated": annotated})
 
         return results
+
+    def get_assigned_labels(
+        self,
+        annotator: str,
+        by_cluster: bool = False,
+        threshold: float = 0.0
+    ) -> List[str]:
+        """Get all distinct cluster or intent labels for texts assigned to an annotator.
+
+        Args:
+            annotator: Annotator name
+            by_cluster: If True, return cluster names; if False, intent labels
+            threshold: Minimum candidate probability
+
+        Returns:
+            Sorted list of label strings
+        """
+        with get_connection(self.db_path) as conn:
+            if by_cluster:
+                rows = conn.execute("""
+                    SELECT DISTINCT i.cluster AS label
+                    FROM texts t
+                    JOIN candidates c ON c.text_id = t.id
+                    JOIN intents i ON i.label = c.label
+                    WHERE t.assigned_to = ?
+                      AND c.probability >= ?
+                    ORDER BY label
+                """, (annotator, threshold)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT DISTINCT c.label
+                    FROM texts t
+                    JOIN candidates c ON c.text_id = t.id
+                    WHERE t.assigned_to = ?
+                      AND c.probability >= ?
+                    ORDER BY label
+                """, (annotator, threshold)).fetchall()
+            return [r["label"] for r in rows]
+
+    def get_uncategorized_count(
+        self,
+        annotator: str,
+        threshold: float = 0.0
+    ) -> dict:
+        """Count texts assigned to an annotator with no candidate above threshold.
+
+        Returns:
+            Dict with 'total' and 'annotated' counts
+        """
+        with get_connection(self.db_path) as conn:
+            base = """
+                FROM texts t
+                WHERE t.assigned_to = ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM candidates c
+                    WHERE c.text_id = t.id AND c.probability >= ?
+                  )
+            """
+            params = [annotator, threshold]
+            total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
+            annotated = conn.execute(
+                f"""SELECT COUNT(*) {base}
+                    AND EXISTS (
+                        SELECT 1 FROM annotations a
+                        WHERE a.text_id = t.id AND a.annotator = ?
+                    )""",
+                params + [annotator]
+            ).fetchone()[0]
+            return {"total": total, "annotated": annotated}

@@ -157,7 +157,8 @@ class AnnotationService:
         language: Optional[str] = None,
         candidate_label: Optional[str] = None,
         candidate_threshold: float = 0.0,
-        candidate_by_cluster: bool = False
+        candidate_by_cluster: bool = False,
+        uncategorized_threshold: Optional[float] = None
     ) -> List[dict]:
         """Get all texts for navigation."""
         return self.text_repo.get_all_texts_for_annotator(
@@ -167,7 +168,8 @@ class AnnotationService:
             language=language,
             candidate_label=candidate_label,
             candidate_threshold=candidate_threshold,
-            candidate_by_cluster=candidate_by_cluster
+            candidate_by_cluster=candidate_by_cluster,
+            uncategorized_threshold=uncategorized_threshold
         )
 
     @st.cache_data
@@ -184,6 +186,30 @@ class AnnotationService:
             labels=list(labels),
             threshold=threshold,
             by_cluster=by_cluster
+        )
+
+    def get_assigned_labels(
+        self,
+        annotator: str,
+        by_cluster: bool = False,
+        threshold: float = 0.0
+    ) -> List[str]:
+        """Get all distinct cluster/intent labels for texts assigned to an annotator."""
+        return self.text_repo.get_assigned_labels(
+            annotator=annotator,
+            by_cluster=by_cluster,
+            threshold=threshold
+        )
+
+    def get_uncategorized_count(
+        self,
+        annotator: str,
+        threshold: float = 0.0
+    ) -> dict:
+        """Count texts with no candidate above threshold."""
+        return self.text_repo.get_uncategorized_count(
+            annotator=annotator,
+            threshold=threshold
         )
 
     def _score_annotators(
@@ -262,15 +288,25 @@ class AnnotationService:
         import random as _random
 
         scores = self._score_annotators(candidates, annotators, language)
-        if not scores:
-            return None
 
-        max_score = max(scores.values())
-        winners = [
-            ann.name
-            for ann in annotators          # preserve list order
-            if scores.get(ann.name, 0.0) == max_score
-        ]
+        if not scores:
+            # No annotator matched by intent/cluster — round-robin among
+            # language-compatible annotators so texts never stay unassigned.
+            text_lang = (language or "").strip().lower()
+            lang_compatible = [
+                ann.name for ann in annotators
+                if ann.language == text_lang
+            ]
+            if not lang_compatible:
+                return None
+            winners = lang_compatible
+        else:
+            max_score = max(scores.values())
+            winners = [
+                ann.name
+                for ann in annotators          # preserve list order
+                if scores.get(ann.name, 0.0) == max_score
+            ]
 
         if len(winners) == 1:
             winner = winners[0]
@@ -354,42 +390,26 @@ class AnnotationService:
             scores = self._score_annotators(candidates, annotators, language)
 
             if not scores:
-                # Fallback: find all annotators matching the text's language
+                # No annotator matched by intent/cluster — round-robin among
+                # language-compatible annotators so texts never stay unassigned.
                 text_lang = (language or "").strip().lower()
-                lang_matched = [
+                lang_compatible = [
                     ann.name for ann in annotators
-                    if (ann.language or "").strip().lower() == text_lang
+                    if ann.language == text_lang
                 ]
-                
-                if not lang_matched:
-                    # No language match either → leave unassigned
+                if not lang_compatible:
                     continue
-                
-                # Resolve via load-balancing on language-matched annotators
-                min_count = min(running_counts[name] for name in lang_matched)
-                candidates_with_min = [
-                    name for name in lang_matched if running_counts[name] == min_count
+                winners = lang_compatible
+            else:
+                max_score = max(scores.values())
+                winners = [
+                    ann.name
+                    for ann in annotators              # preserve list order
+                    if scores.get(ann.name, 0.0) == max_score
                 ]
-                
-                if len(candidates_with_min) == 1:
-                    winner = candidates_with_min[0]
-                else:
-                    winner = rng.choice(sorted(candidates_with_min))
-                
-                clear_assignments.append((text_id, winner))
-                running_counts[winner] += 1
-                continue
-
-            max_score = max(scores.values())
-            winners = [
-                ann.name
-                for ann in annotators              # preserve list order
-                if scores.get(ann.name, 0.0) == max_score
-            ]
 
             if len(winners) == 1:
                 clear_assignments.append((text_id, winners[0]))
-                running_counts[winners[0]] += 1
             else:
                 mask = 0
                 for name in winners:
@@ -397,10 +417,11 @@ class AnnotationService:
                     mask |= 1 << (n - 1 - i)
                 tie_queue.append((text_id, mask, winners))
 
-        # Apply clear assignments
+        # Apply clear assignments and update running counts
         updates: Dict[int, str] = {}
         for text_id, winner in clear_assignments:
             updates[text_id] = winner
+            running_counts[winner] += 1
 
         # --- Phase 2: sort tie queue by bitmask (groups same competitor sets) ---
         tie_queue.sort(key=lambda t: t[1])

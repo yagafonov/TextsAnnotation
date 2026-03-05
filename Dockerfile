@@ -19,8 +19,7 @@ ENV TEXTS_DB_PATH=/app/data/db/app.db \
     TEXTS_TOP_K=5 \
     TEXTS_MARGIN_THRESHOLD=0.1 \
     TEXTS_INTENTS_PATH=/app/data/intents \
-    TEXTS_ANNOTATORS_PATH=/app/data/annotators.yaml \
-    TEXTS_IMPORT_CSV_PATH=/app/data/requests.csv
+    TEXTS_ANNOTATORS_PATH=/app/data/annotators.yaml
 
 EXPOSE 8501
 

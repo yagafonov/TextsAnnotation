@@ -68,27 +68,12 @@ class TestConfig:
         """Test that invalid path values fall back to defaults and log a warning."""
         with caplog.at_level("WARNING"):
             with patch.dict(os.environ, {
-                "TEXTS_IMPORT_CSV_PATH": "",  # Empty path
                 "TEXTS_ANNOTATORS_PATH": "   "  # Whitespace path
             }, clear=True):
                 s = Settings(_env_file=None)
-                
-                # Assert fallbacks
-                assert s.import_csv_path == "data/requests.csv"
-                assert s.annotators_path == "data/annotators.yaml"
-                
-                # Check log output
-                assert "Invalid or empty value for TEXTS_IMPORT_CSV_PATH in .env: ''. Using default: data/requests.csv" in caplog.text
 
-    def test_non_existent_path_falls_back_to_default(self, caplog):
-        """Test that non-existent import paths fall back to defaults and log a warning."""
-        with caplog.at_level("WARNING"):
-            with patch.dict(os.environ, {
-                "TEXTS_IMPORT_CSV_PATH": "non_existent_file.csv"
-            }, clear=True):
-                s = Settings(_env_file=None)
-                assert s.import_csv_path == "data/requests.csv"
-                assert "Path does not exist for TEXTS_IMPORT_CSV_PATH: non_existent_file.csv. Using default: data/requests.csv" in caplog.text
+                # Assert fallbacks
+                assert s.annotators_path == "data/annotators.yaml"
 
     def test_case_insensitivity(self):
         """Test that env vars are case-insensitive."""

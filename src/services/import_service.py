@@ -92,7 +92,9 @@ class ImportService:
                         text = text.strip()
                     if not text:
                         continue
+                    # Skip texts that already exist — import never modifies existing records
                     if self.text_repo.exists(text):
+                        logger.debug(f"Skipping existing text: {text[:50]}...")
                         continue
                     
                     language = self._normalize_language(row.get("language"))

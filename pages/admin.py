@@ -898,7 +898,8 @@ def show_import_section():
             
             # Import button
             st.subheader("▶️ Выполнить импорт")
-            
+            st.info("ℹ️ Импорт добавляет только новые тексты. Существующие записи в базе данных не будут изменены.")
+
             if st.button("🚀 Импортировать данные", type="primary"):
                 with st.spinner("Импортирую данные..."):
                     try:

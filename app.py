@@ -4,7 +4,6 @@ This is the main entry point for the annotation interface.
 Uses the new modular architecture with services and repositories.
 """
 
-import os
 import sys
 import html
 from datetime import datetime, timedelta
@@ -29,7 +28,6 @@ from src.repositories.intent_repo import IntentRepository
 from src.repositories.user_settings_repo import UserSettingsRepository
 from src.services.annotation_service import AnnotationService
 from src.services.auth_service import AuthService
-from src.services.import_service import ImportService
 from src.utils.config import settings, LANGUAGE_NAMES
 from src.utils.database import init_database, restore_from_dump, start_auto_dump
 from src.utils.logger import logger
@@ -218,7 +216,6 @@ def get_services():
     return {
         "auth": AuthService(settings.annotators_path),
         "annotation": AnnotationService(settings.db_path),
-        "import": ImportService(settings.db_path),
         "intent_repo": IntentRepository(settings.db_path),
         "user_settings": UserSettingsRepository(settings.db_path),
     }
@@ -242,38 +239,6 @@ def to_bold(text: str) -> str:
             result += char
     return result
 
-
-def handle_import(services: dict, intents: Dict[str, Intent]):
-    """Handle CSV import."""
-    import_service: ImportService = services["import"]
-    intent_repo: IntentRepository = services["intent_repo"]
-    
-    # Get current versions
-    current_model_version = int(intent_repo.get_setting("current_model_version", "0"))
-    current_data_version = int(intent_repo.get_setting("current_data_version", "0"))
-    
-    # Get annotators for assignment
-    auth_service: AuthService = services["auth"]
-    annotators_config = auth_service.load_annotators()
-    
-    logger.info(f"Checking for new texts to import from: {settings.import_csv_path}")
-    count = import_service.import_from_csv(
-        csv_path=settings.import_csv_path,
-        intents=intents,
-        top_k=settings.top_k,
-        model_version=current_model_version,
-        data_version=current_data_version,
-        probability_threshold=settings.probability_threshold,
-        annotators=annotators_config.annotators,
-        annotation_service=services["annotation"]
-    )
-    
-    if count > 0:
-        logger.info(f"Import successful: added {count} new texts")
-        st.success(f"✅ Импортировано {count} текстов")
-        st.cache_resource.clear()
-    else:
-        logger.info("Import completed: no new texts found in CSV")
 
 
 def authenticate_user(auth_service: AuthService) -> Optional[Annotator]:
@@ -380,21 +345,40 @@ def show_annotation_interface(
         st.write(f"**Язык:** {lang_name}")
         
         st.write(f"**{'Интенты' if annotator.intents else 'Кластеры'}:**")
-        # Build label stats for the dropdown
+        # Build label stats for the dropdown — show all labels with assigned texts
         _use_intents = bool(annotator.intents)
-        _labels = annotator.intents if _use_intents else (annotator.clusters or [])
+        _assigned_labels = annotation_service.get_assigned_labels(
+            annotator=annotator.name,
+            by_cluster=not _use_intents,
+            threshold=0.0
+        )
+        _labels = _assigned_labels
         if _labels:
             _stats = annotation_service.get_label_stats(
                 annotator=annotator.name,
                 labels=tuple(_labels),
-                threshold=settings.annotators_intents_confidence_threshold,
+                threshold=0.0,
                 by_cluster=not _use_intents
             )
+            # Add "uncategorized" bucket for texts with no stored candidates
+            _uncat = annotation_service.get_uncategorized_count(
+                annotator=annotator.name,
+                threshold=0.0
+            )
+            if _uncat["total"] > 0:
+                _stats.append({"label": "__other__", "total": _uncat["total"], "annotated": _uncat["annotated"]})
+
             _stats.sort(key=lambda s: (-(s["total"] - s["annotated"]), s["label"]))
             _options = [None] + [s["label"] for s in _stats]
             _format = {
                 None: "Все",
-                **{s["label"]: f"{s['label']} ({s['annotated']}/{s['total']})" for s in _stats}
+                **{
+                    s["label"]: (
+                        f"Другое ({s['annotated']}/{s['total']})" if s["label"] == "__other__"
+                        else f"{s['label']} ({s['annotated']}/{s['total']})"
+                    )
+                    for s in _stats
+                }
             }
             # FIX 2: restore selected_label from ?label= query param on first load
             if "selected_label" not in st.session_state:
@@ -456,6 +440,7 @@ def show_annotation_interface(
     # Get all texts for navigation (respecting selected label filter)
     # FIX 3: compute navigation list FIRST so progress uses the same set of texts.
     _selected_label = st.session_state.get("selected_label")
+    _is_other_filter = _selected_label == "__other__"
     _use_intents = bool(annotator.intents)
     _filter_intents = annotator.intents if annotator.intents else None
     _filter_clusters = annotator.clusters if not annotator.intents and annotator.clusters else None
@@ -465,13 +450,14 @@ def show_annotation_interface(
         clusters=_filter_clusters,
         intents=_filter_intents,
         language=annotator.language,
-        candidate_label=_selected_label,
-        candidate_threshold=settings.annotators_intents_confidence_threshold if _selected_label else 0.0,
-        candidate_by_cluster=not _use_intents
+        candidate_label=_selected_label if not _is_other_filter else None,
+        candidate_threshold=0.0 if _selected_label and not _is_other_filter else 0.0,
+        candidate_by_cluster=not _use_intents,
+        uncategorized_threshold=0.0 if _is_other_filter else None
     )
 
 
-    # Progress: global — all annotated / all assigned (ignores active filter)
+    # Progress: all texts assigned to this annotator (matches navigation list)
     _global_progress = annotation_service.get_progress(
         annotator=annotator.name,
         language=annotator.language
@@ -566,14 +552,14 @@ def show_annotation_interface(
 
     for i, t in enumerate(all_texts):
         is_annotated = t["is_annotated"]
-        is_skipped = t["is_skipped"]
-        
-        # Determine status
-        if is_skipped:
-            if show_skipped:
-                add_to_filtered(t, i)
-        elif is_annotated:
+        is_skipped = t["is_skipped"] and not is_annotated
+
+        # Determine status: annotated takes priority over skipped
+        if is_annotated:
             if show_annotated:
+                add_to_filtered(t, i)
+        elif is_skipped:
+            if show_skipped:
                 add_to_filtered(t, i)
         else:
             if show_pending:
@@ -614,17 +600,17 @@ def show_annotation_interface(
     
     for i, t in enumerate(all_texts):
         is_annotated = t["is_annotated"]
-        is_skipped = t["is_skipped"]
+        is_skipped = t["is_skipped"] and not is_annotated
         is_current = (t["id"] == current_real_id)
-        
+
         should_show = False
         if is_current:
             should_show = True
-        elif is_skipped:
-            if show_skipped:
-                should_show = True
         elif is_annotated:
             if show_annotated:
+                should_show = True
+        elif is_skipped:
+            if show_skipped:
                 should_show = True
         else:
             if show_pending:
@@ -664,8 +650,8 @@ def show_annotation_interface(
         is_current = (idx == current_filtered_index)
         marker = "📍 " if is_current else ""
         status = ""
-        if t["is_skipped"]: status = "⏭️ "
-        elif t["is_annotated"]: status = "✅ "
+        if t["is_annotated"]: status = "✅ "
+        elif t["is_skipped"]: status = "⏭️ "
         
         # Truncate text
         text_preview = t["text"][:40] + "..." if len(t["text"]) > 40 else t["text"]
@@ -694,7 +680,7 @@ def show_annotation_interface(
     text_id = current_text["id"]
     text_content = current_text["text"]
     is_completed = current_text["is_annotated"]
-    is_skipped_status = current_text["is_skipped"]
+    is_skipped_status = current_text["is_skipped"] and not is_completed
 
     # Navigation arrows (Main Area) — iterate within filtered list
     col_prev, col_status, col_next = st.columns([1, 4, 1])
@@ -1105,17 +1091,7 @@ def main():
         
         st.write("⚙️ Настройка сервисов...")
         services = get_services()
-        
-        # Handle import
-        if os.path.exists(settings.import_csv_path):
-            if "import_done" not in st.session_state:
-                st.write("📥 Проверка и импорт новых текстов...")
-                handle_import(services, intents)
-                st.session_state.import_done = True
-        else:
-            if "import_done" not in st.session_state:
-                st.session_state.import_done = True
-        
+
         # Trigger rebalancing if needed
         st.write("⚖️ Балансировка назначений...")
         auth_service: AuthService = services["auth"]

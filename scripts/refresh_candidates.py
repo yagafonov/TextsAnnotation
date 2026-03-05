@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.utils.config import settings
 
-CSV_PATH = settings.import_csv_path
+CSV_PATH = os.environ.get("CSV_PATH", "data/requests.csv")
 DB_PATH = settings.db_path
 PROBABILITY_THRESHOLD = settings.probability_threshold
 

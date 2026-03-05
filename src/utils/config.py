@@ -1,7 +1,6 @@
 """Centralized configuration management using Pydantic."""
 
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -91,18 +90,16 @@ class Settings(BaseSettings):
             logger.warning(f"Invalid value for {env_name} in .env: {v}. Using default: {default}")
             return default
 
-    @field_validator("intents_path", "annotators_path", "import_csv_path", mode="before")
+    @field_validator("intents_path", "annotators_path", mode="before")
     @classmethod
     def validate_paths(cls, v, info):
         field_defaults = {
             "intents_path": "data/intents",
             "annotators_path": "data/annotators.yaml",
-            "import_csv_path": "data/requests.csv"
         }
         env_names = {
             "intents_path": "TEXTS_INTENTS_PATH",
             "annotators_path": "TEXTS_ANNOTATORS_PATH",
-            "import_csv_path": "TEXTS_IMPORT_CSV_PATH"
         }
         field_name = info.field_name
         default = field_defaults.get(field_name)
@@ -112,19 +109,12 @@ class Settings(BaseSettings):
             logger.warning(f"Invalid or empty value for {env_name} in .env: {repr(v)}. Using default: {default}")
             return default
 
-        # Optional: check if path exists for input files
-        path_val = v.strip()
-        if field_name == "import_csv_path" and not os.path.exists(path_val):
-             logger.warning(f"Path does not exist for {env_name}: {path_val}. Using default: {default}")
-             return default
-
-        return path_val
+        return v.strip()
 
 
     # Paths
     intents_path: str = Field(default="data/intents", validation_alias=AliasChoices("TEXTS_INTENTS_PATH", "intents_path"))
     annotators_path: str = Field(default="data/annotators.yaml", validation_alias=AliasChoices("TEXTS_ANNOTATORS_PATH", "annotators_path"))
-    import_csv_path: str = Field(default="data/requests.csv", validation_alias=AliasChoices("TEXTS_IMPORT_CSV_PATH", "import_csv_path"))
 
     # Admin
     admin_password: str = Field(default="admin123", validation_alias=AliasChoices("TEXTS_ADMIN_PASSWORD", "admin_password"))

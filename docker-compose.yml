@@ -13,5 +13,4 @@ services:
       - TEXTS_MARGIN_THRESHOLD=0.1
       - TEXTS_INTENTS_PATH=/app/data/intents
       - TEXTS_ANNOTATORS_PATH=/app/data/annotators.yaml
-      - TEXTS_IMPORT_CSV_PATH=/app/data/requests.csv
     restart: always

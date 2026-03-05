@@ -73,12 +73,16 @@ class AnnotationRepository(BaseRepository):
                     """,
                     (text_id, annotator, label, "extra", now)
                 )
-            
+
+            # Clear skip status atomically within the same transaction
+            conn.execute(
+                "DELETE FROM skipped_texts WHERE text_id = ? AND annotator = ?",
+                (text_id, annotator)
+            )
+            conn.execute("UPDATE texts SET is_skipped = 0 WHERE id = ?", (text_id,))
+
             conn.commit()
             logger.info(f"Saved {len(decisions) + len(extra_labels)} annotations for text#{text_id} by {annotator}")
-            
-        # Clear skip status if it exists
-        self.unskip_text(text_id, annotator)
     
     def skip_text(self, text_id: int, annotator: str) -> None:
         """Mark a text as skipped by annotator.
