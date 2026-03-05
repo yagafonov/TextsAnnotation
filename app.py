@@ -967,16 +967,6 @@ def show_annotation_interface(
         unsafe_allow_html=True,
     )
 
-    def _render_intent_details(intent):
-        """Render description caption and examples expander for an intent."""
-        if intent.description:
-            st.caption(f"**Описание:** {intent.description}")
-        all_examples = intent.train + intent.test
-        if all_examples:
-            with st.expander("📝 Примеры"):
-                examples_md = "\n".join([f"- {ex}" for ex in all_examples])
-                st.markdown(examples_md)
-
     for candidate, source in shown_items:
         intent = intents.get(candidate.label)
         if not intent:
@@ -990,7 +980,14 @@ def show_annotation_interface(
                 label_text,
                 key=f"cand_{candidate.label}_{text_id}"
             )
-            _render_intent_details(intent)
+            if intent.description:
+                st.caption(f"**Описание:** {intent.description}")
+
+            all_examples = intent.train + intent.test
+            if all_examples:
+                with st.expander("📝 Примеры"):
+                    examples_md = "\n".join([f"- {ex}" for ex in all_examples])
+                    st.markdown(examples_md)
         decisions[candidate.label] = "yes" if decision else "no"
         shown_intents_source[candidate.label] = source
 
@@ -1018,20 +1015,22 @@ def show_annotation_interface(
                     value=True,
                     key=f"cand_{extra_label}_{text_id}",
                 )
-                _render_intent_details(intent)
+                if intent.description:
+                    st.caption(f"**Описание:** {intent.description}")
+                all_examples = intent.train + intent.test
+                if all_examples:
+                    with st.expander("📝 Примеры"):
+                        examples_md = "\n".join([f"- {ex}" for ex in all_examples])
+                        st.markdown(examples_md)
             with _ecol2:
                 if st.button("✕", key=f"_remove_extra_{extra_label}_{text_id}", help="Убрать"):
-                    try:
-                        st.session_state[_extra_key].remove(extra_label)
-                    except ValueError:
-                        pass
+                    st.session_state[_extra_key].remove(extra_label)
                     st.rerun()
             decisions[extra_label] = "yes" if _extra_decision else "no"
         shown_intents_source[extra_label] = "extra"
 
-    _exclude = set(candidate_labels) | set(extra_labels)
     _available = sorted(
-        [label for label in intents if label not in _exclude]
+        [label for label in intents if label not in candidate_labels and label not in extra_labels]
     )
     _select_key = f"_extra_select_{text_id}"
     _placeholder = "Выберите интент..."
