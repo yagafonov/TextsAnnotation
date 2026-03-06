@@ -141,34 +141,40 @@ DARK_THEME_CSS = """
         border-color: #3a3a4a !important;
     }
 
-    /* ── Floating Action Buttons (Fixed at bottom) ───────── */
+    /* ── Dark-theme overrides for action buttons ─────────── */
     div[data-testid="stHorizontalBlock"]:has(button[kind="primary"]) {
-        position: fixed;
-        bottom: 0px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 100%;
-        max-width: 736px; /* Matches Streamlit's default centered width */
-        z-index: 999;
         background-color: #0e1117 !important;
-        padding: 1.5rem 1rem 2rem 1rem;
-        border-top: 1px solid rgba(250, 250, 250, 0.1);
-        box-shadow: 0 -10px 20px rgba(0,0,0,0.5);
+        border-top-color: rgba(250, 250, 250, 0.1) !important;
     }
-    
-    /* Make the primary (Save) button look like a secondary (Skip) button */
     div[data-testid="stHorizontalBlock"] button[kind="primary"] {
         background-color: #262730 !important;
         color: #fafafa !important;
         border-color: #4a4a5a !important;
     }
-
-    /* Add padding to the bottom of the main section so content isn't hidden behind the floating buttons */
-    section.stMain > div.stMainBlockContainer {
-        padding-bottom: 120px !important;
-    }
 </style>
 """
+
+# Always-on CSS: action buttons styling (works in both light and dark themes)
+st.markdown("""
+<style>
+    /* ── Action Buttons: sticky at bottom of viewport ───── */
+    div[data-testid="stHorizontalBlock"]:has(button[kind="primary"]) {
+        position: sticky;
+        bottom: 0px;
+        z-index: 999;
+        background-color: #ffffff;
+        padding: 1rem 0;
+        border-top: 1px solid rgba(0, 0, 0, 0.1);
+    }
+    /* ── Hide injected JS iframes from layout flow ──────── */
+    [data-testid="stHtml"] {
+        position: absolute !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 if st.query_params.get("dark") == "1":
     st.markdown(DARK_THEME_CSS, unsafe_allow_html=True)
@@ -520,8 +526,24 @@ def show_annotation_interface(
     if st.session_state.scroll_to_top:
         js = """
         <script>
-            var body = window.parent.document.querySelector(".main");
-            if (body) body.scrollTop = 0;
+        (function() {
+            function scrollUp() {
+                var selectors = [
+                    "section.stMain",
+                    "[data-testid='stAppViewContainer']",
+                    ".main",
+                    "section.main"
+                ];
+                for (var i = 0; i < selectors.length; i++) {
+                    var el = window.parent.document.querySelector(selectors[i]);
+                    if (el) { el.scrollTop = 0; }
+                }
+                window.parent.scrollTo(0, 0);
+            }
+            scrollUp();
+            setTimeout(scrollUp, 100);
+            setTimeout(scrollUp, 300);
+        })();
         </script>
         """
         components.html(js, height=0)
@@ -848,7 +870,7 @@ def show_annotation_interface(
             if (e.key === 'Escape' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {{
                 if (!isInput) {{
                     const btns = Array.from(pDoc.querySelectorAll('button'));
-                    const skipBtn = btns.find(b => b.textContent.includes('Пропустить') || b.textContent.includes('Вернуть в работу'));
+                    const skipBtn = btns.find(b => b.textContent.includes('Пропустить'));
                     if (skipBtn) {{
                         e.preventDefault();
                         e.stopImmediatePropagation();
@@ -989,28 +1011,13 @@ def show_annotation_interface(
         shown_intents_source[candidate.label] = source
 
     # Extra intents
-    # FIX 4: inject CSS so the first part (intent name) appears bold in the dropdown,
-    # while format_func returns plain text so the name stays searchable.
-    st.markdown("""
-    <style>
-    /* Bold intent name in the Additional Intents multiselect dropdown */
-    div[data-baseweb="popover"] ul li div span {
-        font-weight: 600;
-    }
-    </style>""", unsafe_allow_html=True)
     available_intents = sorted(
         [label for label in intents if label not in candidate_labels]
     )
 
-    def format_intent_option(label):
-        intent = intents.get(label)
-        desc = f" {intent.description}" if intent and intent.description else ""
-        return f"[{label}]{desc}"
-
     extra_labels = st.multiselect(
         "Добавить дополнительные интенты:",
-        options=available_intents,
-        format_func=format_intent_option
+        options=available_intents
     )
     
     for extra in extra_labels:
@@ -1061,17 +1068,12 @@ def show_annotation_interface(
             st.rerun()
     
     with col2:
-        if is_skipped_status:
-            if st.button("↩️ Вернуть в работу [Esc]", width="stretch"):
-                annotation_service.unskip_text(text_id, annotator.name)
-                st.rerun()
-        else:
-            if st.button("⏭️ Пропустить [Esc]", width="stretch"):
-                annotation_service.skip_text(text_id, annotator.name)
-                # Jump to next pending text within filtered list
-                next_idx = find_next_pending_filtered(current_filtered_index, filtered_texts, text_to_original_index)
-                st.session_state.current_text_index = next_idx
-                st.rerun()
+        if st.button("⏭️ Пропустить [Esc]", width="stretch"):
+            annotation_service.skip_text(text_id, annotator.name)
+            # Jump to next pending text within filtered list
+            next_idx = find_next_pending_filtered(current_filtered_index, filtered_texts, text_to_original_index)
+            st.session_state.current_text_index = next_idx
+            st.rerun()
 
 
 @st.cache_resource
@@ -1084,23 +1086,32 @@ def ensure_assignments(annotators_hash: str, _annotation_service: AnnotationServ
 
 def main():
     """Main application entry point."""
-    # Initialize with status visibility
-    with st.status("🚀 Запуск приложения...", expanded=True) as status:
-        st.write("📂 Подготовка базы данных и интентов...")
-        intents = initialize_app()
-        
-        st.write("⚙️ Настройка сервисов...")
-        services = get_services()
+    # Show initialization status only on first load
+    _first_load = "app_initialized" not in st.session_state
+    if _first_load:
+        with st.status("🚀 Запуск приложения...", expanded=True) as status:
+            st.write("📂 Подготовка базы данных и интентов...")
+            intents = initialize_app()
 
-        # Trigger rebalancing if needed
-        st.write("⚖️ Балансировка назначений...")
+            st.write("⚙️ Настройка сервисов...")
+            services = get_services()
+
+            st.write("⚖️ Балансировка назначений...")
+            auth_service: AuthService = services["auth"]
+            config = auth_service.load_annotators()
+            annotators_repr = "".join(sorted([f"{a.name}:{','.join(sorted(a.intents))}" for a in config.annotators]))
+            ensure_assignments(annotators_repr, services["annotation"], auth_service)
+
+            status.update(label="✅ Инициализация завершена", state="complete", expanded=False)
+        st.session_state.app_initialized = True
+    else:
+        intents = initialize_app()
+        services = get_services()
         auth_service: AuthService = services["auth"]
         config = auth_service.load_annotators()
         annotators_repr = "".join(sorted([f"{a.name}:{','.join(sorted(a.intents))}" for a in config.annotators]))
         ensure_assignments(annotators_repr, services["annotation"], auth_service)
-        
-        status.update(label="✅ Инициализация завершена", state="complete", expanded=False)
-    
+
     _sync_settings_from_cookies()
 
     annotator = authenticate_user(auth_service)
