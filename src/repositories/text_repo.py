@@ -272,10 +272,12 @@ class TextRepository(BaseRepository):
         clusters: Optional[List[str]] = None,
         intents: Optional[List[str]] = None,
         language: Optional[str] = None,
-        candidate_label: Optional[str] = None,
-        candidate_threshold: float = 0.0,
-        candidate_by_cluster: bool = False,
-        uncategorized_threshold: Optional[float] = None
+        shown_cluster: Optional[str] = None,
+        shown_uncategorized: bool = False,
+        shown_top_k: int = 5,
+        shown_threshold: float = 0.0,
+        shown_annotator_intents: Optional[List[str]] = None,
+        shown_annotator_clusters: Optional[List[str]] = None,
     ) -> List[dict]:
         """Get all texts with status for an annotator.
         
@@ -336,38 +338,34 @@ class TextRepository(BaseRepository):
             filters.append(assignment_clause)
             params.extend(assignment_params)
 
-            # Candidate content filter (applies to ALL texts, not just assignment)
-            if candidate_label:
-                if candidate_by_cluster:
-                    filters.append("""
+            # Shown-candidate cluster filter
+            if shown_cluster or shown_uncategorized:
+                shown_cond, shown_params = self._shown_candidate_condition(
+                    shown_top_k, shown_threshold,
+                    shown_annotator_intents, shown_annotator_clusters
+                )
+                if shown_cluster:
+                    filters.append(f"""
                         EXISTS (
                             SELECT 1 FROM candidates c
                             JOIN intents i ON i.label = c.label
                             WHERE c.text_id = t.id
                               AND i.cluster = ?
-                              AND c.probability >= ?
+                              AND {shown_cond}
                         )
                     """)
-                else:
-                    filters.append("""
-                        EXISTS (
+                    params.append(shown_cluster)
+                    params.extend(shown_params)
+                elif shown_uncategorized:
+                    filters.append(f"""
+                        NOT EXISTS (
                             SELECT 1 FROM candidates c
+                            JOIN intents i ON i.label = c.label
                             WHERE c.text_id = t.id
-                              AND c.label = ?
-                              AND c.probability >= ?
+                              AND {shown_cond}
                         )
                     """)
-                params.extend([candidate_label, candidate_threshold])
-
-            # Uncategorized filter: texts with no candidate above threshold
-            if uncategorized_threshold is not None:
-                filters.append("""
-                    NOT EXISTS (
-                        SELECT 1 FROM candidates c
-                        WHERE c.text_id = t.id AND c.probability >= ?
-                    )
-                """)
-                params.append(uncategorized_threshold)
+                    params.extend(shown_params)
 
             where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
             query = f"{base_query} {where_clause} ORDER BY t.id ASC"
@@ -375,137 +373,113 @@ class TextRepository(BaseRepository):
             rows = conn.execute(query, params).fetchall()
             return [dict(row) for row in rows]
 
-    def get_label_stats(
+    def _shown_candidate_condition(
+        self,
+        top_k: int,
+        threshold: float,
+        annotator_intents: Optional[List[str]] = None,
+        annotator_clusters: Optional[List[str]] = None,
+    ) -> tuple:
+        """Build SQL condition + params for 'shown candidates'.
+
+        A candidate is shown if:
+          rank <= top_k OR label IN annotator_intents OR cluster IN annotator_clusters
+        AND probability > threshold.
+
+        Returns (sql_fragment, params) — the fragment uses aliases c (candidates) and i (intents).
+        """
+        union_parts = ["c.rank <= ?"]
+        union_params: list = [top_k]
+
+        if annotator_intents:
+            ph = ", ".join("?" for _ in annotator_intents)
+            union_parts.append(f"c.label IN ({ph})")
+            union_params.extend(annotator_intents)
+
+        if annotator_clusters:
+            ph = ", ".join("?" for _ in annotator_clusters)
+            union_parts.append(f"i.cluster IN ({ph})")
+            union_params.extend(annotator_clusters)
+
+        union_cond = " OR ".join(union_parts)
+        sql = f"c.probability > ? AND ({union_cond})"
+        params = [threshold] + union_params
+        return sql, params
+
+    def get_shown_label_stats(
         self,
         annotator: str,
-        labels: List[str],
+        top_k: int,
         threshold: float,
-        by_cluster: bool = False
+        annotator_intents: Optional[List[str]] = None,
+        annotator_clusters: Optional[List[str]] = None,
+        by_cluster: bool = True
     ) -> List[dict]:
-        """Get per-intent or per-cluster stats for an annotator.
+        """Get per-cluster (or per-intent) stats based on shown candidates.
 
-        Counts texts where:
-          - assigned_to = annotator
-          - at least one candidate matches the label (or cluster) with probability >= threshold
-
-        Args:
-            annotator: Annotator name
-            labels: List of intent labels or cluster names
-            threshold: Minimum candidate probability to count
-            by_cluster: If True, labels are cluster names; if False, they are intent labels
+        A candidate is 'shown' if rank <= top_k OR in annotator's intents/clusters.
+        Only shown candidates with probability > threshold are counted.
+        A text may appear in multiple groups.
 
         Returns:
             List of dicts: {label, total, annotated}
         """
-        results = []
+        shown_cond, shown_params = self._shown_candidate_condition(
+            top_k, threshold, annotator_intents, annotator_clusters
+        )
+        group_col = "i.cluster" if by_cluster else "c.label"
+
         with get_connection(self.db_path) as conn:
-            for label in labels:
-                if by_cluster:
-                    match_cond = """
-                        EXISTS (
-                            SELECT 1 FROM candidates c
-                            JOIN intents i ON i.label = c.label
-                            WHERE c.text_id = t.id
-                              AND i.cluster = ?
-                              AND c.probability >= ?
-                        )
-                    """
-                else:
-                    match_cond = """
-                        EXISTS (
-                            SELECT 1 FROM candidates c
-                            WHERE c.text_id = t.id
-                              AND c.label = ?
-                              AND c.probability >= ?
-                        )
-                    """
+            rows = conn.execute(f"""
+                SELECT
+                    {group_col} AS label,
+                    COUNT(DISTINCT t.id) AS total,
+                    COUNT(DISTINCT CASE WHEN EXISTS (
+                        SELECT 1 FROM annotations a
+                        WHERE a.text_id = t.id AND a.annotator = ?
+                    ) THEN t.id END) AS annotated
+                FROM texts t
+                JOIN candidates c ON c.text_id = t.id
+                JOIN intents i ON i.label = c.label
+                WHERE t.assigned_to = ?
+                  AND {shown_cond}
+                GROUP BY {group_col}
+                ORDER BY label
+            """, [annotator, annotator] + shown_params).fetchall()
+            return [dict(r) for r in rows]
 
-                base = f"""
-                    FROM texts t
-                    WHERE t.assigned_to = ?
-                      AND {match_cond}
-                """
-                params = [annotator, label, threshold]
-
-                total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
-                annotated = conn.execute(
-                    f"""SELECT COUNT(*) {base}
-                        AND EXISTS (
-                            SELECT 1 FROM annotations a
-                            WHERE a.text_id = t.id AND a.annotator = ?
-                        )""",
-                    params + [annotator]
-                ).fetchone()[0]
-
-                results.append({"label": label, "total": total, "annotated": annotated})
-
-        return results
-
-    def get_assigned_labels(
+    def get_shown_uncategorized_count(
         self,
         annotator: str,
-        by_cluster: bool = False,
-        threshold: float = 0.0
-    ) -> List[str]:
-        """Get all distinct cluster or intent labels for texts assigned to an annotator.
-
-        Args:
-            annotator: Annotator name
-            by_cluster: If True, return cluster names; if False, intent labels
-            threshold: Minimum candidate probability
-
-        Returns:
-            Sorted list of label strings
-        """
-        with get_connection(self.db_path) as conn:
-            if by_cluster:
-                rows = conn.execute("""
-                    SELECT DISTINCT i.cluster AS label
-                    FROM texts t
-                    JOIN candidates c ON c.text_id = t.id
-                    JOIN intents i ON i.label = c.label
-                    WHERE t.assigned_to = ?
-                      AND c.probability >= ?
-                    ORDER BY label
-                """, (annotator, threshold)).fetchall()
-            else:
-                rows = conn.execute("""
-                    SELECT DISTINCT c.label
-                    FROM texts t
-                    JOIN candidates c ON c.text_id = t.id
-                    WHERE t.assigned_to = ?
-                      AND c.probability >= ?
-                    ORDER BY label
-                """, (annotator, threshold)).fetchall()
-            return [r["label"] for r in rows]
-
-    def get_uncategorized_count(
-        self,
-        annotator: str,
-        threshold: float = 0.0
+        top_k: int,
+        threshold: float,
+        annotator_intents: Optional[List[str]] = None,
+        annotator_clusters: Optional[List[str]] = None,
     ) -> dict:
-        """Count texts assigned to an annotator with no candidate above threshold.
+        """Count texts with no shown candidate above threshold.
 
         Returns:
             Dict with 'total' and 'annotated' counts
         """
+        shown_cond, shown_params = self._shown_candidate_condition(
+            top_k, threshold, annotator_intents, annotator_clusters
+        )
+
         with get_connection(self.db_path) as conn:
-            base = """
+            row = conn.execute(f"""
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN EXISTS (
+                        SELECT 1 FROM annotations a
+                        WHERE a.text_id = t.id AND a.annotator = ?
+                    ) THEN 1 ELSE 0 END) AS annotated
                 FROM texts t
                 WHERE t.assigned_to = ?
                   AND NOT EXISTS (
-                    SELECT 1 FROM candidates c
-                    WHERE c.text_id = t.id AND c.probability >= ?
+                      SELECT 1 FROM candidates c
+                      JOIN intents i ON i.label = c.label
+                      WHERE c.text_id = t.id
+                        AND {shown_cond}
                   )
-            """
-            params = [annotator, threshold]
-            total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
-            annotated = conn.execute(
-                f"""SELECT COUNT(*) {base}
-                    AND EXISTS (
-                        SELECT 1 FROM annotations a
-                        WHERE a.text_id = t.id AND a.annotator = ?
-                    )""",
-                params + [annotator]
-            ).fetchone()[0]
-            return {"total": total, "annotated": annotated}
+            """, [annotator, annotator] + shown_params).fetchone()
+            return {"total": row["total"], "annotated": row["annotated"] or 0}

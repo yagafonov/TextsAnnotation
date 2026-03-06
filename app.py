@@ -351,28 +351,29 @@ def show_annotation_interface(
         st.write(f"**Язык:** {lang_name}")
         
         st.write(f"**{'Интенты' if annotator.intents else 'Кластеры'}:**")
-        # Build label stats for the dropdown — show all labels with assigned texts
+        # Build stats: shown candidates (top-K ∪ annotator intents/clusters) with prob > threshold
         _use_intents = bool(annotator.intents)
-        _assigned_labels = annotation_service.get_assigned_labels(
+        _ann_intents_t = tuple(annotator.intents) if annotator.intents else None
+        _ann_clusters_t = tuple(annotator.clusters) if annotator.clusters else None
+        _stats = annotation_service.get_shown_label_stats(
             annotator=annotator.name,
-            by_cluster=not _use_intents,
-            threshold=0.0
+            top_k=settings.top_k,
+            threshold=settings.probability_threshold,
+            annotator_intents=_ann_intents_t,
+            annotator_clusters=_ann_clusters_t,
+            by_cluster=not _use_intents
         )
-        _labels = _assigned_labels
-        if _labels:
-            _stats = annotation_service.get_label_stats(
-                annotator=annotator.name,
-                labels=tuple(_labels),
-                threshold=0.0,
-                by_cluster=not _use_intents
-            )
-            # Add "uncategorized" bucket for texts with no stored candidates
-            _uncat = annotation_service.get_uncategorized_count(
-                annotator=annotator.name,
-                threshold=0.0
-            )
-            if _uncat["total"] > 0:
-                _stats.append({"label": "__other__", "total": _uncat["total"], "annotated": _uncat["annotated"]})
+        # Add uncategorized bucket
+        _uncat = annotation_service.get_shown_uncategorized_count(
+            annotator=annotator.name,
+            top_k=settings.top_k,
+            threshold=settings.probability_threshold,
+            annotator_intents=annotator.intents or None,
+            annotator_clusters=annotator.clusters or None,
+        )
+        if _uncat["total"] > 0:
+            _stats.append({"label": "__other__", "total": _uncat["total"], "annotated": _uncat["annotated"]})
+        if _stats:
 
             _stats.sort(key=lambda s: (-(s["total"] - s["annotated"]), s["label"]))
             _options = [None] + [s["label"] for s in _stats]
@@ -443,11 +444,9 @@ def show_annotation_interface(
         st.divider()
         # (Progress shown below, after all_texts is computed)
 
-    # Get all texts for navigation (respecting selected label filter)
-    # FIX 3: compute navigation list FIRST so progress uses the same set of texts.
+    # Get all texts for navigation (respecting selected cluster/intent filter)
     _selected_label = st.session_state.get("selected_label")
     _is_other_filter = _selected_label == "__other__"
-    _use_intents = bool(annotator.intents)
     _filter_intents = annotator.intents if annotator.intents else None
     _filter_clusters = annotator.clusters if not annotator.intents and annotator.clusters else None
 
@@ -456,10 +455,12 @@ def show_annotation_interface(
         clusters=_filter_clusters,
         intents=_filter_intents,
         language=annotator.language,
-        candidate_label=_selected_label if not _is_other_filter else None,
-        candidate_threshold=0.0 if _selected_label and not _is_other_filter else 0.0,
-        candidate_by_cluster=not _use_intents,
-        uncategorized_threshold=0.0 if _is_other_filter else None
+        shown_cluster=_selected_label if _selected_label and not _is_other_filter else None,
+        shown_uncategorized=_is_other_filter,
+        shown_top_k=settings.top_k,
+        shown_threshold=settings.probability_threshold,
+        shown_annotator_intents=annotator.intents or None,
+        shown_annotator_clusters=annotator.clusters or None,
     )
 
 
@@ -723,7 +724,8 @@ def show_annotation_interface(
         # Centered text counter + filter description
         _scope_label = st.session_state.get("selected_label")
         _scope_kind  = "Интент" if annotator.intents else "Кластер"
-        _label_part  = f"{_scope_kind}: {_scope_label}. " if _scope_label else ""
+        _scope_display = "Другое" if _scope_label == "__other__" else _scope_label
+        _label_part  = f"{_scope_kind}: {_scope_display}. " if _scope_label else ""
 
         # Build status description from checkbox flags
         _flags = (show_annotated, show_pending, show_skipped)

@@ -155,10 +155,12 @@ class AnnotationService:
         clusters: Optional[List[str]] = None,
         intents: Optional[List[str]] = None,
         language: Optional[str] = None,
-        candidate_label: Optional[str] = None,
-        candidate_threshold: float = 0.0,
-        candidate_by_cluster: bool = False,
-        uncategorized_threshold: Optional[float] = None
+        shown_cluster: Optional[str] = None,
+        shown_uncategorized: bool = False,
+        shown_top_k: int = 5,
+        shown_threshold: float = 0.0,
+        shown_annotator_intents: Optional[List[str]] = None,
+        shown_annotator_clusters: Optional[List[str]] = None,
     ) -> List[dict]:
         """Get all texts for navigation."""
         return self.text_repo.get_all_texts_for_annotator(
@@ -166,50 +168,49 @@ class AnnotationService:
             clusters=clusters,
             intents=intents,
             language=language,
-            candidate_label=candidate_label,
-            candidate_threshold=candidate_threshold,
-            candidate_by_cluster=candidate_by_cluster,
-            uncategorized_threshold=uncategorized_threshold
+            shown_cluster=shown_cluster,
+            shown_uncategorized=shown_uncategorized,
+            shown_top_k=shown_top_k,
+            shown_threshold=shown_threshold,
+            shown_annotator_intents=shown_annotator_intents,
+            shown_annotator_clusters=shown_annotator_clusters,
         )
 
     @st.cache_data
-    def get_label_stats(
+    def get_shown_label_stats(
         _self,
         annotator: str,
-        labels: tuple,  # tuple for hashability with st.cache_data
+        top_k: int,
         threshold: float,
-        by_cluster: bool = False
+        annotator_intents: Optional[tuple] = None,
+        annotator_clusters: Optional[tuple] = None,
+        by_cluster: bool = True
     ) -> List[dict]:
-        """Get per-intent or per-cluster stats for an annotator (cached)."""
-        return _self.text_repo.get_label_stats(
+        """Get per-cluster/intent stats based on shown candidates (cached)."""
+        return _self.text_repo.get_shown_label_stats(
             annotator=annotator,
-            labels=list(labels),
+            top_k=top_k,
             threshold=threshold,
+            annotator_intents=list(annotator_intents) if annotator_intents else None,
+            annotator_clusters=list(annotator_clusters) if annotator_clusters else None,
             by_cluster=by_cluster
         )
 
-    def get_assigned_labels(
+    def get_shown_uncategorized_count(
         self,
         annotator: str,
-        by_cluster: bool = False,
-        threshold: float = 0.0
-    ) -> List[str]:
-        """Get all distinct cluster/intent labels for texts assigned to an annotator."""
-        return self.text_repo.get_assigned_labels(
-            annotator=annotator,
-            by_cluster=by_cluster,
-            threshold=threshold
-        )
-
-    def get_uncategorized_count(
-        self,
-        annotator: str,
-        threshold: float = 0.0
+        top_k: int,
+        threshold: float,
+        annotator_intents: Optional[List[str]] = None,
+        annotator_clusters: Optional[List[str]] = None,
     ) -> dict:
-        """Count texts with no candidate above threshold."""
-        return self.text_repo.get_uncategorized_count(
+        """Count texts with no shown candidate above threshold."""
+        return self.text_repo.get_shown_uncategorized_count(
             annotator=annotator,
-            threshold=threshold
+            top_k=top_k,
+            threshold=threshold,
+            annotator_intents=annotator_intents,
+            annotator_clusters=annotator_clusters,
         )
 
     def _score_annotators(
