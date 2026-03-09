@@ -6,6 +6,7 @@ __pycache__/
 *.sqlite3
 *.sql
 .venv
+.DS_Store
 data/raw_texts_with_preds
 .streamlit/
 logs

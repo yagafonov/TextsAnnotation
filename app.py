@@ -4,6 +4,7 @@ This is the main entry point for the annotation interface.
 Uses the new modular architecture with services and repositories.
 """
 
+import random
 import sys
 import html
 from datetime import datetime, timedelta
@@ -801,6 +802,27 @@ def show_annotation_interface(
         for c in candidates:
             if c.label in annotator.intents and c.probability >= threshold and c.label not in shown_map:
                 shown_map[c.label] = (c, "annotator_intent")
+
+    # Fallback: if no candidates to show, pick one deterministic intent based on text_id
+    if not shown_map:
+        if annotator.clusters:
+            available_labels = [
+                label for label, intent in intents.items()
+                if intent.cluster in annotator.clusters
+            ]
+        else:
+            available_labels = list(intents.keys())
+
+        if available_labels:
+            available_labels.sort()  # Ensure consistent ordering
+            fallback_label = available_labels[text_id % len(available_labels)]
+            fake_candidate = Candidate(
+                label=fallback_label,
+                probability=0.0,
+                rank=1
+            )
+            shown_map[fallback_label] = (fake_candidate, "random_fallback")
+
     _show_conf = annotation_service.text_repo.get_setting("show_confidence", "0") == "1"
     if _show_conf:
         shown_items = sorted(shown_map.values(), key=lambda x: x[0].probability, reverse=True)
